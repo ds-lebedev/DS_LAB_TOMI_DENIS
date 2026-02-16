@@ -5,9 +5,9 @@ author:
   - name: "[Denis Lebedev]"
     st. number: "4826973"
     email: "d.lebedev@students.uu.nl"
-  - name: "Tomi ____"
+  - name: "Tamas Kiss"
     st. number: "0000000"
-    email: "t._____@students.uu.nl"
+    email: "t.kiss@students.uu.nl"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   html_document:
@@ -301,3 +301,4 @@ df %>%
 ```{r appendix-figures}
 # TODO
 ```
+
