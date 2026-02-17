@@ -5,9 +5,9 @@ author:
   - name: "[Denis Lebedev]"
     st. number: "4826973"
     email: "d.lebedev@students.uu.nl"
-  - name: "Tamas Kiss"
+  - name: "Tomi ____"
     st. number: "0000000"
-    email: "t.kiss@students.uu.nl"
+    email: "t._____@students.uu.nl"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   html_document:
@@ -118,7 +118,27 @@ We, the aforementioned students, herewith declare that we have divided the work 
 
 ## 1.1 Research question and motivation
 
-[Write here.]
+Research Question Ideas:
+
+1) Do such variables as sex, age, education and marital status help predict the probability of default?
+  - age can mean more experience and more savings -> less probability of default
+  - marriage can help mitigate the default due to common savings
+  - education can mean more financial awareness -> less probability of default
+
+2) Do previous loan payments help predict probability of default?
+  - diligent payments -> signal of low prob-ty of default
+  - or do people pay whenever it is convenient, and past payment are not good indicators?
+  
+3) Does the loan amount serve as a default indicator?
+  - more debt -> higher default rate?
+  - loan amount categories?
+
+Methodology ideas:
+ - supervised learning
+ - no specific models until we look at the data
+    (for 1 - regression, lasso\ridge
+     for 2 - same
+     for 3 - could be RDD)
 
 ## 1.2 Contribution and related literature (brief)
 
@@ -136,7 +156,33 @@ We, the aforementioned students, herewith declare that we have divided the work 
 
 ## 2.1 Data source and sample construction
 
-[Write here.]
+```
+ID: ID of each client
+LIMIT_BAL: Amount of given credit in NT dollars (includes individual and family/supplementary credit)
+SEX: Gender (1=male, 2=female)
+EDUCATION: (1=graduate school, 2=university, 3=high school, 4=others, 5=unknown, 6=unknown)
+MARRIAGE: Marital status (1=married, 2=single, 3=others)
+AGE: Age in years
+PAY_0: Repayment status in September, 2005 (-1=pay duly, 1=payment delay for one month, 2=payment delay for two months, … 8=payment delay for eight months, 9=payment delay for nine months and above)
+PAY_2: Repayment status in August, 2005 (scale same as above)
+PAY_3: Repayment status in July, 2005 (scale same as above)
+PAY_4: Repayment status in June, 2005 (scale same as above)
+PAY_5: Repayment status in May, 2005 (scale same as above)
+PAY_6: Repayment status in April, 2005 (scale same as above)
+BILL_AMT1: Amount of bill statement in September, 2005 (NT dollar)
+BILL_AMT2: Amount of bill statement in August, 2005 (NT dollar)
+BILL_AMT3: Amount of bill statement in July, 2005 (NT dollar)
+BILL_AMT4: Amount of bill statement in June, 2005 (NT dollar)
+BILL_AMT5: Amount of bill statement in May, 2005 (NT dollar)
+BILL_AMT6: Amount of bill statement in April, 2005 (NT dollar)
+PAY_AMT1: Amount of previous payment in September, 2005 (NT dollar)
+PAY_AMT2: Amount of previous payment in August, 2005 (NT dollar)
+PAY_AMT3: Amount of previous payment in July, 2005 (NT dollar)
+PAY_AMT4: Amount of previous payment in June, 2005 (NT dollar)
+PAY_AMT5: Amount of previous payment in May, 2005 (NT dollar)
+PAY_AMT6: Amount of previous payment in April, 2005 (NT dollar)
+default.payment.next.month: Default payment (1=yes, 0=no)
+```
 
 ## 2.2 Variables and definitions
 
@@ -301,4 +347,3 @@ df %>%
 ```{r appendix-figures}
 # TODO
 ```
-
