@@ -1,15 +1,17 @@
 ---
 title: "Data Science Lab Research Project"
-subtitle: "[Choose sub-title yourself]"
 author:
-  - name: "[Denis Lebedev]"
-    st. number: "4826973"
-    email: "d.lebedev@students.uu.nl"
-  - name: "Tomi ____"
-    st. number: "0000000"
-    email: "t._____@students.uu.nl"
+- name: Denis Lebedev
+  st. number: '4826973'
+  email: d.lebedev@students.uu.nl
+- name: Tamas Kiss
+  st. number: '4944216'
+  email: t.kiss@students.uu.nl
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
+  pdf_document:
+    toc: true
+    toc_depth: '3'
   html_document:
     toc: true
     toc_depth: 3
@@ -18,12 +20,12 @@ output:
     df_print: paged
     code_folding: show
     highlight: tango
-
+subtitle: ''
 params:
-  course: "Data Science Lab (ECB3DSL), Academic year 2024/2025"
-  team: "Group 1"
-  supervisor: "TBD"
-  word_count: "TBD"
+  course: Data Science Lab (ECB3DSL), Academic year 2025/2026
+  team: Group 2
+  supervisor: Matías Golman
+  word_count: TBD
 ---
 
 ```{r setup, include=FALSE}
@@ -44,6 +46,9 @@ library(kableExtra)
 library(ggplot2)
 library(janitor)
 library(skimr)
+library(corrplot)
+library(reshape2)
+library(modelsummary)
 ```
 
 # Title page
@@ -52,8 +57,8 @@ library(skimr)
 **Team:** `r params$team`  
 
 **Students:**  
-- [Student Name 1, Student Number 1, Student Email 1]  
-- [Student Name 2, Student Number 2, Student Email 2]  
+- [Denis Lebedev, 4826973, d.lebedev@students.uu.nl]  
+- [Tamas Kiss, 4944216, t.kiss@students.uu.nl]  
 
 **Supervisor(s):** `r params$supervisor`  
 
@@ -80,10 +85,10 @@ Utrecht University School of Economics is responsible solely for the supervision
 # Disclosure Statement (only if applicable)
 
 In this project, we have made use of the following Generative AI tools:  
-- [List the tools]
+- Open AI's "Chat GPT"
 
 We have used these tools for:  
-- [Short statement of what you used the tool(s) for]
+- R code generating based on prompts, explicitly stating the logic, theory and purpose of the code
 
 ---
 
@@ -94,7 +99,7 @@ We, the aforementioned students, herewith declare that we have divided the work 
 | Section and Content | Name and Student Number |
 |---|---|
 | 1 Introduction | All students |
-| 2 Data | [Student Name & Number 1] |
+| 2 Data | [Student Name & Number 2] |
 | 3 Descriptive Analyses | [Student Name & Number 2] |
 | 4 Empirical Approach | [All students / Assigned] |
 | 5 Results | [Student Name & Number 3] |
@@ -156,6 +161,12 @@ Methodology ideas:
 
 ## 2.1 Data source and sample construction
 
+[Write here.]
+
+## 2.2 Variables and definitions
+
+Complete list of variables:
+
 ```
 ID: ID of each client
 LIMIT_BAL: Amount of given credit in NT dollars (includes individual and family/supplementary credit)
@@ -183,10 +194,6 @@ PAY_AMT5: Amount of previous payment in May, 2005 (NT dollar)
 PAY_AMT6: Amount of previous payment in April, 2005 (NT dollar)
 default.payment.next.month: Default payment (1=yes, 0=no)
 ```
-
-## 2.2 Variables and definitions
-
-[Write here.]
 
 ## 2.3 Data cleaning and preprocessing
 
@@ -463,31 +470,220 @@ theme(
 p_age
 ```
 
-## 3.3 Correlations / relationships (if relevant)
+### Further visual exploration of suggested RQs 2 and 3
 
-```{r correlations}
-# TODO: Example correlation matrix (numeric vars only)
-df_num <- df %>% select(where(is.numeric))
-cor_mat <- cor(df_num, use = "pairwise.complete.obs")
-knitr::kable(round(cor_mat, 3))
+```{r}
+
+# ----------------------------
+# Dynamic Path: past repayments
+# ----------------------------
+
+pay_vars <- c("pay_0","pay_2","pay_3","pay_4","pay_5","pay_6")
+
+df_dyn <- df %>%
+  mutate(
+    worst_delay = pmax(!!!rlang::syms(pay_vars), na.rm = TRUE),
+    months_late = rowSums(across(all_of(pay_vars), ~ .x >= 1), na.rm = TRUE)
+  )
+
+# (1) Default rate by worst observed delay status
+dyn_worst <- df_dyn %>%
+  group_by(worst_delay) %>%
+  summarise(
+    n = n(),
+    default_rate = mean(default == "Default"),
+    .groups = "drop"
+  ) %>%
+  mutate(worst_delay = factor(worst_delay, levels = sort(unique(worst_delay))))
+
+p_dyn1 <- dyn_worst %>%
+  ggplot(aes(x = worst_delay, y = default_rate)) +
+  geom_col(width = 0.75, fill = "#2C7FB8") +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.4, size = 3.1, fontface = "bold") +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  scale_y_continuous(labels = percent, limits = c(0, NA), expand = expansion(mult = c(0, 0.18))) +
+  labs(
+    title = "Dynamic path: default rate by worst repayment status (pay_*)",
+    subtitle = "Worst delay observed across the last 6 months",
+    x = "Worst repayment status (higher = more delayed)", y = "Default rate"
+  ) +
+  coord_cartesian(clip = "off") +
+  theme_ds() +
+  theme(plot.margin = margin(5.5, 30, 5.5, 5.5))
+
+p_dyn1
+
+# (2) Default rate by number of months with delay (>= 1)
+dyn_late <- df_dyn %>%
+  group_by(months_late) %>%
+  summarise(
+    n = n(),
+    default_rate = mean(default == "Default"),
+    .groups = "drop"
+  )
+
+p_dyn2 <- dyn_late %>%
+  ggplot(aes(x = months_late, y = default_rate)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.8, size = 3.1, fontface = "bold") +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  scale_y_continuous(labels = percent, limits = c(0, NA), expand = expansion(mult = c(0, 0.18))) +
+  scale_x_continuous(breaks = sort(unique(dyn_late$months_late))) +
+  labs(
+    title = "Dynamic path: default rate vs. frequency of delayed payments",
+    subtitle = "Months late = count of pay_* >= 1 (across 6 months)",
+    x = "Number of months late", y = "Default rate"
+  ) +
+  coord_cartesian(clip = "off") +
+  theme_ds() +
+  theme(plot.margin = margin(5.5, 30, 5.5, 5.5))
+
+p_dyn2
+
+
+# ----------------------------
+# Volume Path: loan amount (credit limit)
+# ----------------------------
+
+df_vol <- df %>%
+  filter(!is.na(limit_bal)) %>%
+  mutate(limit_decile = ntile(limit_bal, 10))
+
+vol_dec <- df_vol %>%
+  group_by(limit_decile) %>%
+  summarise(
+    n = n(),
+    default_rate = mean(default == "Default"),
+    mean_limit = mean(limit_bal),
+    .groups = "drop"
+  )
+
+# (1) Default rate by limit_bal decile
+p_vol1 <- vol_dec %>%
+  ggplot(aes(x = limit_decile, y = default_rate)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.8, size = 3.1, fontface = "bold") +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  scale_y_continuous(labels = percent, limits = c(0, NA), expand = expansion(mult = c(0, 0.18))) +
+  scale_x_continuous(breaks = 1:10) +
+  labs(
+    title = "Volume path: default rate by credit limit (limit_bal) deciles",
+    subtitle = "Decile 1 = lowest credit limits, Decile 10 = highest",
+    x = "limit_bal decile", y = "Default rate"
+  ) +
+  coord_cartesian(clip = "off") +
+  theme_ds() +
+  theme(plot.margin = margin(5.5, 30, 5.5, 5.5))
+
+p_vol1
+
+# (2) Distribution view: limit_bal by default status
+p_vol2 <- df_vol %>%
+  mutate(default = factor(default, levels = c("No Default", "Default"))) %>%
+  ggplot(aes(x = default, y = limit_bal)) +
+  geom_boxplot(outlier.alpha = 0.15) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Volume path: credit limit distribution by default status",
+    subtitle = "Boxplot of limit_bal for Default vs No Default",
+    x = NULL, y = "limit_bal"
+  ) +
+  theme_ds()
+
+p_vol2
 ```
+
+
+
+## 3.3 Correlations / relationships (if relevant)
 
 ###Correlation check
 ```{r}
-df %>%
-  mutate(default_num = ifelse(default == "Default", 1, 0)) %>%
-  select(age, limit_bal, default_num) %>%
-  cor()
+pay_vars <- c("pay_0","pay_2","pay_3","pay_4","pay_5","pay_6")
+
+df_corr <- df %>%
+  mutate(
+    # Dynamic path
+    avg_repay_status = rowMeans(across(all_of(pay_vars)), na.rm = TRUE),
+
+    # Outcome
+    default_num = ifelse(default == "Default", 1, 0),
+
+    # Sex: 1 = Male
+    sex_male = ifelse(sex == "Male", 1, 0),
+
+    # Education ordered (higher = more education)
+    education_level = case_when(
+      education == "Graduate School" ~ 3,
+      education == "University" ~ 2,
+      education == "High School" ~ 1,
+      TRUE ~ 0   # Other / Unknown
+    ),
+
+    # Married dummy
+    married = ifelse(marriage == "Married", 1, 0)
+  )
+
+corr_data <- df_corr %>%
+  select(default_num, limit_bal, avg_repay_status, age, sex_male, education_level, married) %>%
+  mutate(across(everything(), as.numeric))  # final safety
+
+cor_matrix <- cor(corr_data) #, use = "pairwise.complete.obs"
+
+cor_long <- melt(cor_matrix)
+
+ggplot(cor_long, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(value, 2)), size = 3) +
+  scale_fill_gradient2(low = "#B2182B", mid = "white", high = "#2166AC", midpoint = 0) +
+  theme_ds() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Correlation Matrix (Key Variables)", x = NULL, y = NULL)
 ```
 ###Starter model
 ```{r}
-model1 <- glm(default ~ sex + age + education + marriage,
-              data = df,
-              family = "binomial")
+model1 <- glm(
+  default_num ~ age + sex_male + education_level + married,
+  data = df_corr,
+  family = binomial
+)
 
 summary(model1)
 ```
 
+
+```{r}
+options(scipen = 999, digits = 3)
+
+model1 <- glm(
+  default_num ~ age + sex_male + education_level + married,
+  data = df_corr,
+  family = binomial
+)
+
+summary(model1)
+
+model2 <- glm(
+  default_num ~ age + sex_male + education_level + married + limit_bal,
+  data = df_corr,
+  family = binomial
+)
+
+summary(model2)
+
+model3 <- glm(
+  default_num ~ age + sex_male + education_level + married + limit_bal + avg_repay_status,
+  data = df_corr,
+  family = binomial
+)
+
+summary(model3)
+```
 
 ---
 
