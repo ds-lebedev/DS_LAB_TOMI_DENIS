@@ -240,6 +240,22 @@ df <- df %>%
                           levels = c(0,1),
                           labels = c("No Default", "Default")))
 ```
+### Cleaning of the "Unknown" values from the categorical variables
+
+```{r}
+df <- df %>%
+  filter(!(education == "Unknown" | education == "Other"))
+
+df <- df %>%
+  filter(!(marriage == "Unknown" | marriage == "Other"))
+
+df <- df %>%
+  mutate(limit_bal_th = limit_bal / 1000)
+
+df
+```
+
+
 ### Summary
 
 ```{r}
@@ -630,7 +646,7 @@ df_corr <- df %>%
   )
 
 corr_data <- df_corr %>%
-  select(default_num, limit_bal, avg_repay_status, age, sex_male, education_level, married) %>%
+  select(default_num, limit_bal_th, avg_repay_status, age, sex_male, education_level, married) %>%
   mutate(across(everything(), as.numeric))  # final safety
 
 cor_matrix <- cor(corr_data) #, use = "pairwise.complete.obs"
@@ -647,17 +663,6 @@ ggplot(cor_long, aes(Var1, Var2, fill = value)) +
 ```
 ###Starter model
 ```{r}
-model1 <- glm(
-  default_num ~ age + sex_male + education_level + married,
-  data = df_corr,
-  family = binomial
-)
-
-summary(model1)
-```
-
-
-```{r}
 options(scipen = 999, digits = 3)
 
 model1 <- glm(
@@ -669,7 +674,7 @@ model1 <- glm(
 summary(model1)
 
 model2 <- glm(
-  default_num ~ age + sex_male + education_level + married + limit_bal,
+  default_num ~ age + sex_male + education_level + married + limit_bal_th,
   data = df_corr,
   family = binomial
 )
@@ -677,7 +682,7 @@ model2 <- glm(
 summary(model2)
 
 model3 <- glm(
-  default_num ~ age + sex_male + education_level + married + limit_bal + avg_repay_status,
+  default_num ~ age + sex_male + education_level + married + limit_bal_th + avg_repay_status,
   data = df_corr,
   family = binomial
 )
