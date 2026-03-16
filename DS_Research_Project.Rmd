@@ -9,17 +9,17 @@ author:
   email: t.kiss@students.uu.nl
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
-  pdf_document:
-    toc: true
-    toc_depth: '3'
   html_document:
     toc: true
     toc_depth: 3
-    number_sections: true
+    number_sections: false
     theme: flatly
     df_print: paged
     code_folding: show
     highlight: tango
+  pdf_document:
+    toc: true
+    toc_depth: '3'
 subtitle: ''
 params:
   course: Data Science Lab (ECB3DSL), Academic year 2025/2026
@@ -49,6 +49,7 @@ library(skimr)
 library(corrplot)
 library(reshape2)
 library(modelsummary)
+library(glmnet)
 ```
 
 # Title page
@@ -119,37 +120,32 @@ We, the aforementioned students, herewith declare that we have divided the work 
 
 # 1 Introduction
 
-[Discuss: overall topic; specific research question; why it matters (societal + scientific debate, link to literature); short overview of main findings; brief overview of methodology.]
+Credit risk assessment is a central task for financial institutions, as lenders must evaluate the probability that borrowers will fail to repay their obligations. Accurate prediction of credit default allows banks to manage lending portfolios, allocate capital efficiently, and reduce financial losses. With the increasing availability of borrower-level financial data, modern credit risk analysis increasingly relies on statistical and machine learning methods that use borrower characteristics and financial behavior to estimate the probability of default.
+
+A large body of literature focuses on predictive models of credit default. Yeh and Lien (2009) compare several data mining techniques for predicting default among credit card clients using a dataset of 25,000 borrowers from Taiwan. Their dataset includes demographic characteristics, credit limits, repayment history, billing information, and payment behavior, allowing researchers to evaluate multiple dimensions of borrower risk. The authors demonstrate that machine learning methods can effectively estimate the probability of default and emphasize that probability-based predictions provide more informative risk assessments than simple binary classifications of borrowers.
+
+Beyond predictive modeling, the literature also examines the economic and behavioral determinants of credit default. Borrower characteristics such as age, education, and marital status are commonly incorporated into credit scoring models because they may reflect differences in financial stability and socioeconomic background. Empirical studies of credit card delinquency show that borrower characteristics and household leverage influence both the likelihood of entering delinquency and the transition to more severe stages of default.
+
+Financial exposure is another important factor in credit risk analysis. Credit limits represent the scale of available borrowing and are often assumed to increase default risk by expanding potential debt exposure. However, recent research suggests that the relationship may be more complex. Using a Bayesian causal inference framework, Pitso and Michael (2026) find that higher credit limits may reduce the probability of default by providing liquidity buffers and lowering credit utilization ratios, which can help borrowers manage temporary financial shocks.
+
+Finally, repayment behavior is widely recognized as one of the strongest predictors of default. Past payment delays provide direct signals of borrower liquidity constraints and financial discipline, making repayment history variables among the most informative predictors used in credit scoring models.
 
 ## 1.1 Research question and motivation
 
-Research Question Ideas:
+Building on these insights, this study examines the following research question:
 
-1) Do such variables as sex, age, education and marital status help predict the probability of default?
-  - age can mean more experience and more savings -> less probability of default
-  - marriage can help mitigate the default due to common savings
-  - education can mean more financial awareness -> less probability of default
+*Research Question*:
+To what extent can credit card default be predicted using borrower demographics, credit exposure, and repayment history?
 
-2) Do previous loan payments help predict probability of default?
-  - diligent payments -> signal of low prob-ty of default
-  - or do people pay whenever it is convenient, and past payment are not good indicators?
-  
-3) Does the loan amount serve as a default indicator?
-  - more debt -> higher default rate?
-  - loan amount categories?
+Based on the literature, the following hypotheses are proposed:
 
-Methodology ideas:
- - supervised learning
- - no specific models until we look at the data
-    (for 1 - regression, lasso\ridge
-     for 2 - same
-     for 3 - could be RDD)
+- H1: Poor repayment history (measured through past payment delays) increases the probability of credit default.
+- H2: Higher credit exposure increases the probability of default.
+- H3: Borrower characteristics associated with greater financial stability (such as higher education and older age) reduce the probability of default.
 
-## 1.2 Contribution and related literature (brief)
+This study contributes to the existing literature by jointly evaluating the relative predictive importance of demographic characteristics, financial exposure, and repayment behavior within a unified empirical framework. While prior studies often focus on improving predictive accuracy or testing specific determinants of credit risk, this analysis aims to compare the explanatory contribution of these three groups of variables in predicting borrower default. By doing so, the study provides additional insight into which dimensions of borrower information are most informative for credit risk assessment.
 
-[Write here.]
-
-## 1.3 Preview of approach and findings
+## 1.2 Preview of approach and findings
 
 [Write here.]
 
@@ -157,11 +153,13 @@ Methodology ideas:
 
 # 2 Data
 
-[Describe the dataset and preparations: variable definitions, cleaning, exclusions, transformations — only what is needed to understand the project.]
+This study uses the *Default of Credit Card Clients* dataset, which contains borrower-level information for credit card holders in Taiwan in 2005. The data are widely used in the credit-risk literature and were originally introduced for comparing alternative methods of predicting default. The outcome of interest is whether a client defaults on payment in the following month, which makes the dataset well suited for a supervised-learning setting focused on short-run default prediction.
 
 ## 2.1 Data source and sample construction
 
-[Write here.]
+The raw data include demographic characteristics, credit exposure, repayment status over recent months, bill statements, and previous payments. Since the goal of this project is to compare the predictive relevance of demographics, credit exposure, and repayment behavior, the final working sample keeps variables that belong directly to these categories and removes identifiers that do not carry predictive content. The `ID` variable is therefore dropped immediately, and the data are checked for missing values and duplicate observations before any further processing.
+
+The original coding of several categorical variables is also converted into more interpretable factor labels. In particular, sex, education, marital status, and default status are recoded into human-readable categories. In line with the descriptive focus of this paper, observations with unclear education and marital-status categories are removed from the final analytical sample. Finally, credit limits are also expressed in thousands of New Taiwan dollars (`limit_bal_th`) to make later summaries and regression coefficients easier to read.
 
 ## 2.2 Variables and definitions
 
@@ -196,6 +194,8 @@ default.payment.next.month: Default payment (1=yes, 0=no)
 ```
 
 ## 2.3 Data cleaning and preprocessing
+
+The code below performs the main preprocessing steps used throughout the paper. It imports the raw file, standardizes column names, removes the identifier, checks for missing values and duplicates, recodes the categorical variables, and constructs the transformed credit-limit variable used later in the analysis.
 
 ```{r data-cleaning}
 df <- read_csv("UCI_Credit_Card.csv")
@@ -242,6 +242,8 @@ df <- df %>%
 ```
 ### Cleaning of the "Unknown" values from the categorical variables
 
+Because the categories labelled "Unknown" and "Other" for education and marriage are difficult to interpret economically and are not central to the research question, they are excluded from the main sample. This makes the descriptive comparisons cleaner and keeps the categorical structure aligned with the main hypotheses about financial stability.
+
 ```{r}
 df <- df %>%
   filter(!(education == "Unknown" | education == "Other"))
@@ -258,11 +260,15 @@ df
 
 ### Summary
 
+The next summary table provides a general overview of the cleaned sample. The most important takeaway is that the dataset still contains a large number of observations after preprocessing and preserves substantial variation in all key variables. This is useful both for descriptive analysis and for the regression models that follow.
+
 ```{r}
 skim(df)
 ```
 
 ### Number \ Share of Default Payments
+
+Before turning to the graphical analysis, it is also useful to inspect the class balance of the outcome. As expected for a credit-risk dataset, non-default cases remain the majority, while defaults account for a smaller but still sizeable share of the sample. This means the dataset is somewhat imbalanced, but not to a degree that would prevent meaningful modeling. The second small table shows that the cleaned sample is also reasonably balanced by sex.
 
 ```{r}
 df %>%
@@ -278,17 +284,23 @@ df %>%
 
 # 3 Descriptive Analyses
 
-[Provide descriptive analyses needed to understand key features of the data relevant for your research question.]
+This section uses summary statistics and graphs to examine how default varies across the three broad groups of predictors discussed in the introduction: demographics, credit exposure, and repayment behavior. The purpose is not yet to make formal causal or predictive claims, but rather to identify the main empirical patterns in the data and assess whether they are broadly consistent with the hypotheses derived from the literature.
 
 ## 3.1 Summary statistics
 
-###Summary table
+### Summary table
+
+The table below reports means and standard deviations for the numeric variables. It provides a compact overview of the scale of credit limits, repayment-status indicators, bill amounts, and payment amounts in the cleaned sample. Since many of the raw monetary variables are highly skewed, the summary statistics are mainly useful here as a baseline description rather than as standalone evidence on default risk.
+
 ```{r summary-stats}
 df %>%
   summarise(across(where(is.numeric), list(mean = mean, sd = sd), na.rm = TRUE))
 ```
 
 ## 3.2 Visual exploration
+
+The visualizations below are organized to match the three parts of the research question. The first set focuses on demographics, the second on repayment behavior, and the third on credit exposure. Each figure is followed by a short interpretation so that the descriptive analysis forms a coherent narrative rather than a collection of standalone graphs.
+
 ```{r}
 library(tidyverse)
 library(scales)
@@ -363,6 +375,9 @@ p_sex <- default_rate_by(df, sex) %>%
 p_sex
 ```
 
+The gender gap is visible but not especially large. Male borrowers default more often than female borrowers, and the male default rate sits above the overall sample average. This suggests that sex may contain some predictive information, but it is clearly not the main driver of default once compared with the repayment-history patterns shown later.
+
+
 ###Default rate by education
 ```{r}
 p_edu <- default_rate_by(df, education) %>%
@@ -402,6 +417,9 @@ theme(
 p_edu
 ```
 
+Education shows a clearer gradient. Borrowers with graduate-school education have the lowest default rate, university borrowers lie in the middle, and high-school borrowers show the highest default rate. Descriptively, this is consistent with the idea that higher educational attainment is associated with greater financial stability and lower default risk.
+
+
 ###Default rate by marital status
 ```{r}
 p_mar <- default_rate_by(df, marriage) %>%
@@ -417,7 +435,7 @@ p_mar <- default_rate_by(df, marriage) %>%
            x = Inf,
            y = overall_rate,
            label = paste0("Overall: ", scales::percent(overall_rate, accuracy = 0.1)),
-           hjust = 0,2,
+           hjust = 0.2,
            vjust = -0.5,
            color = "red",
            fontface = "bold",
@@ -436,6 +454,9 @@ theme(
 )
 p_mar
 ```
+
+Marital-status differences are also visible, although they are not especially large. In the cleaned sample, single borrowers default somewhat less often than married borrowers. This means marital status may add some descriptive information, but its role appears secondary relative to repayment behavior.
+
 
 ###Default rate by age group
 ```{r}
@@ -465,7 +486,7 @@ p_age <- age_summary %>%
            x = Inf,
            y = overall_rate,
            label = paste0("Overall: ", scales::percent(overall_rate, accuracy = 0.1)),
-           hjust = 0,2,
+           hjust = 0.2,
            vjust = -0.5,
            color = "red",
            fontface = "bold",
@@ -486,7 +507,12 @@ theme(
 p_age
 ```
 
-### Further visual exploration of suggested RQs 2 and 3
+The age profile is more nuanced than a simple downward slope. Default rates are highest among the youngest borrowers, fall for borrowers in roughly the 25–35 range, and then rise again for older groups, with the oldest category also showing elevated default. Descriptively, this suggests a non-linear, roughly U-shaped relationship between age and default rather than a uniformly negative one.
+
+
+### Further visual exploration of repayment behavior and credit exposure
+
+The next two blocks move from demographics to the two other core dimensions of the project: dynamic repayment behavior and credit exposure. These are especially important because both the literature and the earlier presentation suggest that default risk may depend not only on who the borrower is, but also on how the borrower has been repaying and how much credit is available.
 
 ```{r}
 
@@ -614,11 +640,15 @@ p_vol2 <- df_vol %>%
 p_vol2
 ```
 
+The repayment-history plots show the strongest descriptive pattern in the dataset. Default rates rise sharply as the worst observed repayment delay becomes more severe, and they also increase as borrowers accumulate more months with late payments. This strongly supports the idea that repayment history is the most informative predictor of next-month default.
 
+The credit-limit plots tell a clearer story than the raw exposure hypothesis might suggest. Default rates are highest in the lowest credit-limit deciles and generally decline as credit limits increase, although the pattern is not perfectly smooth in every adjacent decile. The boxplot still shows overlap between defaulters and non-defaulters, but descriptively the relationship is predominantly negative: borrowers with lower credit limits appear more likely to default. This is consistent with the interpretation that low credit limits may proxy for weaker borrower quality or tighter liquidity constraints.
 
-## 3.3 Correlations / relationships (if relevant)
+## 3.3 Correlations / relationships
 
-###Correlation check
+A final descriptive step is to summarize the pairwise relationships between the main variables in a compact way. The correlation matrix does not replace the graphs above, but it helps compare the relative strength and direction of the bivariate associations in a single figure.
+
+### Correlation check
 ```{r}
 pay_vars <- c("pay_0","pay_2","pay_3","pay_4","pay_5","pay_6")
 
@@ -661,57 +691,127 @@ ggplot(cor_long, aes(Var1, Var2, fill = value)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   labs(title = "Correlation Matrix (Key Variables)", x = NULL, y = NULL)
 ```
-###Starter model
-```{r}
-options(scipen = 999, digits = 3)
 
-model1 <- glm(
-  default_num ~ age + sex_male + education_level + married,
-  data = df_corr,
-  family = binomial
-)
+The correlation matrix reinforces the visual findings, but it also refines them. The repayment-history proxy (`avg_repay_status`) has the strongest positive association with default. Credit limit shows the second-largest relationship in absolute value, but it is negative rather than positive, which matches the decile plot above. Education is weakly negatively related to default, while sex and marital status are only weakly positively related. Age has almost no linear correlation with default, which is consistent with the earlier graph showing a non-linear rather than monotonic age pattern.
 
-summary(model1)
-
-model2 <- glm(
-  default_num ~ age + sex_male + education_level + married + limit_bal_th,
-  data = df_corr,
-  family = binomial
-)
-
-summary(model2)
-
-model3 <- glm(
-  default_num ~ age + sex_male + education_level + married + limit_bal_th + avg_repay_status,
-  data = df_corr,
-  family = binomial
-)
-
-summary(model3)
-```
+Overall, the descriptive analysis points to a clear ranking of explanatory strength. Repayment history appears to be the dominant predictor of default. Credit exposure also looks relevant, but the descriptive relationship is negative rather than positive, with lower credit limits associated with higher default rates. Demographic variables provide additional differences across borrower groups, although these effects are smaller and, in the case of age, clearly non-linear. These patterns provide a strong empirical motivation for the more formal modeling strategy developed in the next section.
 
 ---
 
 # 4 Empirical Approach
 
-[Explain the empirical approach. This depends on your project (prediction vs causal inference, supervised vs unsupervised, etc.).]
+The descriptive analysis suggests that the predictors of default are not equally informative. The strongest signal in the data comes from repayment behavior: the correlation matrix shows that `avg_repay_status` has by far the largest positive association with default, while the relationship between credit exposure and default is weaker and the age profile appears non-linear rather than purely monotonic. This ranking is also consistent with the credit-scoring literature, which emphasizes the importance of behavioral variables in default prediction and argues that dynamic borrower information often adds more predictive value than static demographic characteristics. Yeh and Lien (2009) use repayment history, credit exposure, and borrower characteristics together in default prediction, while Kim et al. (2018) explicitly argue that behavioral scoring models are needed to capture changes in default risk over time. The recent Bayesian study by Pitso and Michael (2026) further suggests that the effect of credit limits may be more complex than a simple “more credit implies more default” story.
+
+For this reason, the empirical part starts from the strongest descriptive signal and then gradually adds weaker or potentially non-linear predictors. Because the outcome variable is binary, all interpretable benchmark models are estimated using **binomial logistic regression**. To address possible multicollinearity among the richer financial variables, the analysis then extends to **Ridge** and **Lasso** logistic regression.
 
 ## 4.1 Model / method overview
 
-[Write here.]
+The binary outcome is `default_num`, which equals 1 if the borrower defaults in the next month and 0 otherwise. The core engineered predictors already available in the dataset are:
+
+- `avg_repay_status`: average repayment delay across `pay_0`, `pay_2`, `pay_3`, `pay_4`, `pay_5`, and `pay_6`
+- `limit_bal_th`: credit limit in thousands of NT dollars
+- `sex_male`: dummy equal to 1 for male borrowers
+- `education_level`: ordered education measure
+- `married`: dummy equal to 1 for married borrowers
+
+To reflect the non-linear age pattern seen in the descriptive plots, the logistic models additionally include an **age-squared** term. The main specifications are:
+
+\[
+\text{logit}\big(P(default_i=1)\big)=\alpha+\beta_1\,avg\_repay\_status_i
+\]
+
+\[
+\text{logit}\big(P(default_i=1)\big)=\alpha+\beta_1\,avg\_repay\_status_i+\beta_2\,limit\_bal\_th_i
+\]
+
+\[
+\text{logit}\big(P(default_i=1)\big)=\alpha+\beta_1\,avg\_repay\_status_i+\beta_2\,limit\_bal\_th_i+\beta_3\,age_i+\beta_4\,age_i^2+\beta_5\,sex\_male_i+\beta_6\,education\_level_i+\beta_7\,married_i
+\]
+
+Because the credit-limit plots suggest possible non-linearity, a robustness specification replaces the continuous credit-limit term with **credit-limit deciles**.
 
 ## 4.2 Identification / assumptions (if relevant)
 
-[Write here.]
+The goal of this project is primarily **predictive rather than causal**. The logistic coefficients are therefore interpreted as conditional associations rather than causal effects. In particular, the coefficient on `limit_bal_th` should not be read as the causal effect of increasing a borrower’s credit limit, since credit limits are endogenously related to borrower quality and lender selection.
+
+At the same time, the empirical strategy still follows the literature in using economically meaningful model blocks. The repayment-history variable is treated as the strongest behavioral predictor, credit exposure is added next, and demographic controls are added last. This ordering allows us to see whether the contribution of weaker predictors remains after the strongest predictor has already been included.
+
+For the regularized models, the analysis expands beyond the compact engineered specification and uses the original monthly financial variables (`pay_*`, `bill_amt*`, and `pay_amt*`) together with the demographic controls and credit limit. This is statistically useful because the monthly financial variables are likely to be correlated with one another, making Ridge and Lasso natural tools for shrinkage and variable selection.
 
 ## 4.3 Implementation details
 
 ```{r empirical-approach}
-# TODO: Specify train/test split, cross-validation, model specs, etc.
-# set.seed(123)
-# split <- initial_split(df_clean, prop = 0.8)
-# train <- training(split)
-# test  <- testing(split)
+# Modeling dataset used in Section 4
+model_df <- df_corr %>%
+  mutate(
+    age_sq = age^2,
+    limit_bal_decile = factor(ntile(limit_bal_th, 10))
+  )
+
+# Interpretable benchmark models
+m1_behavior <- glm(
+  default_num ~ avg_repay_status,
+  data = model_df,
+  family = binomial
+)
+
+m2_behavior_exposure <- glm(
+  default_num ~ avg_repay_status + limit_bal_th,
+  data = model_df,
+  family = binomial
+)
+
+m3_full <- glm(
+  default_num ~ avg_repay_status + limit_bal_th + age + age_sq +
+    sex_male + education_level + married,
+  data = model_df,
+  family = binomial
+)
+
+m4_full_refreshed_after_results <- glm(
+  default_num ~ avg_repay_status + limit_bal_th + sex_male + married,
+  data = model_df,
+  family = binomial
+)
+```
+
+The modeling strategy therefore proceeds in two steps. First, a compact set of interpretable logistic regressions is estimated to show how predictive performance changes when moving from repayment behavior only to exposure and then to demographics. Second, a non-linear robustness model tests whether the effect of credit limit is better captured by deciles than by a single linear term.
+
+```{r model summaries}
+# =========================
+# MODEL SUMMARIES
+# =========================
+
+# 1) Put your GLM models here
+glm_models <- list(
+  "M1: Behavior only"              = m1_behavior,
+  "M2: Behavior + credit exposure" = m2_behavior_exposure,
+  "M3: Full variable lit"    = m3_full,
+  "M4: Behabior + credit exposure + sex + marrital status"    = m4_full_refreshed_after_results
+)
+
+# 2) Function to print a clean summary for each GLM
+show_glm_summary <- function(model_name, model_obj) {
+  cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+  cat("MODEL:", model_name, "\n")
+  cat(paste(rep("=", 80), collapse = ""), "\n\n")
+  
+  print(summary(model_obj))
+  
+  cat("\n--- Model fit ---\n")
+  cat("AIC:", AIC(model_obj), "\n")
+  cat("Null deviance:", model_obj$null.deviance, "\n")
+  cat("Residual deviance:", model_obj$deviance, "\n")
+  
+  # McFadden pseudo R2
+  pseudo_r2 <- 1 - (model_obj$deviance / model_obj$null.deviance)
+  cat("McFadden pseudo R2:", round(pseudo_r2, 4), "\n")
+}
+
+# 3) Print all GLM summaries
+for (nm in names(glm_models)) {
+  show_glm_summary(nm, glm_models[[nm]])
+}
 ```
 
 ---
@@ -722,12 +822,7 @@ summary(model3)
 
 ## 5.1 Main results
 
-```{r main-results}
-# TODO: Fit model(s) and show main outputs
-# model <- lm(y ~ x1 + x2, data = train)
-# summary(model)
-# tidy(model)
-```
+
 
 ## 5.2 Model evaluation / robustness (if relevant)
 
