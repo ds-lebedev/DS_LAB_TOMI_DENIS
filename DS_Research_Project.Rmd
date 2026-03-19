@@ -1,0 +1,874 @@
+---
+title: "Data Science Lab Research Project"
+author:
+- name: Denis Lebedev
+  st. number: '4826973'
+  email: d.lebedev@students.uu.nl
+- name: Tamas Kiss
+  st. number: '4944216'
+  email: t.kiss@students.uu.nl
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: false
+    theme: journal
+    df_print: paged
+    code_folding: hide
+    highlight: kate
+subtitle: Credit Card Default Risk Prediction
+params:
+  course: Data Science Lab (ECB3DSL), Academic year 2025/2026
+  team: Group 2
+  supervisor: Matías Golman
+  word_count: 5515
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  out.width = "90%"
+)
+
+library(tidyverse)
+library(broom)
+library(modelr)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(janitor)
+library(skimr)
+library(corrplot)
+library(reshape2)
+library(modelsummary)
+library(glmnet)
+library(randomForest)
+library(xgboost)
+library(pROC)
+library(caret)
+library(patchwork)
+```
+
+# Title page
+
+**Course:** `r params$course`  
+**Team:** `r params$team`  
+
+**Students:**  
+- Denis Lebedev, 4826973, d.lebedev@students.uu.nl
+- Tamas Kiss, 4944216, t.kiss@students.uu.nl
+
+**Supervisor(s):** `r params$supervisor`  
+
+**Word count:** `r params$word_count`  
+
+---
+
+# Abstract
+
+This paper investigates to what extent credit card default can be predicted using borrower demographics, credit exposure, and repayment history. Using a sample of 30,000 Taiwanese credit card clients, we estimate a series of logistic regression models and compare their predictive performance against regularised regression, Random Forest, and XGBoost. We find that repayment behavior — specifically the most recent payment status and the cumulative number of delayed payments — dominates prediction across all methods. Credit exposure matters; demographics largely do not. Tree-based methods modestly outperform linear models, but an AUC ceiling near 0.75 suggests the binding constraint is data availability rather than model complexity.
+
+---
+
+# Statement of Originality
+
+We, the aforementioned students, herewith declare to have written this document and that we are responsible for the content of it. We declare that the text and the work presented in this document is original and that no sources other than those mentioned in the text and its references have been used in creating it.
+
+Utrecht University School of Economics is responsible solely for the supervision of completion of the work, not for the content.
+
+---
+
+# Disclosure Statement
+
+In this project, we have made use of the following Generative AI tools:  
+- Open AI's "Chat GPT";     
+- Anthropic's "Claude".
+
+We have used these tools for:  
+- R code generating based on prompts, explicitly stating the logic, theory and purpose of the code
+
+---
+
+# Division of Work
+
+We, the aforementioned students, herewith declare that we have divided the work on this project and this project paper as stated in the following table:
+
+| Section and Content | Name and Student Number |
+|---|---|
+| 1 Introduction | Both students |
+| 2 Data | Tamas Kiss, 4944216 |
+| 3 Descriptive Analyses | Tamas Kiss, 4944216 |
+| 4 Empirical Approach | Both students |
+| 5 Results | Denis Lebedev, 4826973 |
+| 6 Conclusion | Denis Lebedev, 4826973 |
+
+---
+
+# 1 Introduction
+
+## 1.1 Research question and motivation
+
+Credit card default poses a significant and ongoing challenge for financial institutions. When borrowers fail to meet their repayment obligations, banks face direct credit losses, increased provisioning costs, and broader balance-sheet risks. At the societal level, high rates of consumer default have been linked to financial instability and reduced access to credit for future borrowers (Gross and Souleles, 2002). The ability to accurately identify borrowers at risk of default — before the event occurs — is therefore both practically valuable and economically important.
+
+The growth of large-scale consumer credit datasets has created an opportunity to address this challenge using statistical and machine learning methods. Rather than relying on simple credit scoring rules, modern approaches attempt to learn complex patterns from borrower behavior, financial history, and demographic characteristics. Yet a key empirical question remains open: how much of default risk is captured by behavioral signals like repayment history, how much by financial variables like credit exposure, and how much — if any — by demographic characteristics such as age, education, or marital status? Understanding the relative importance of these three categories of predictors has implications not only for model design, but also for fairness in credit allocation: if demographic variables drive prediction, this raises concerns about discriminatory lending; if behavioral signals dominate, this is a more defensible basis for risk assessment.
+
+This paper addresses these questions using a dataset of 30,000 Taiwanese credit card clients observed over the period April–September 2005. The dataset, originally introduced by Yeh and Lien (2009), includes six months of payment history, bill and repayment amounts, credit limits, and demographic information. Our research question is: *to what extent can credit card default be predicted using borrower demographics, credit exposure, and repayment history?* We structure the empirical investigation around three hypotheses:
+
+- **H1:** Poor repayment history (measured through past payment delays) increases the probability of credit default.
+- **H2:** Higher credit exposure decreases the probability of default.
+- **H3:** Borrower characteristics associated with greater financial stability (such as higher education and older age) reduce the probability of default.
+
+## 1.2 Preview of approach and findings
+
+To address these questions, we estimate a sequence of logistic regression models of increasing complexity (M1–M4) and compare their out-of-sample predictive performance against regularised regression (LASSO and Ridge), Random Forest, and XGBoost. The progressive model structure allows us to make inference about which predictors matter, while the model comparison on a held-out test set allows us to assess how much predictive power different approaches can extract from the same data.
+
+We find strong support for H1 and H2, but not H3. Repayment behavior — captured by the most recent payment status (`pay_0`) and the cumulative number of months with delayed payments (`months_late`) — is the dominant predictor across every method we consider. Credit exposure (measured by credit limit in hundred-thousands of NT dollars) consistently and significantly reduces default probability, in line with H2. Demographic characteristics — age, education, sex — are largely insignificant once behavioral and financial variables are controlled for, failing to support H3. One notable exception is marital status: married borrowers default at a higher rate than single ones, a counterintuitive finding we discuss in the context of household financial obligations. Tree-based methods modestly outperform logistic regression (XGBoost AUC of 0.75 versus 0.71 for the best logistic model), but the gap is small, suggesting the relationship between predictors and default is largely linear. Across all models, recall at the standard 0.5 classification threshold is low — the best model catches only around 58% of true defaulters when class weights are applied — pointing to a data limitation rather than a modeling failure.
+
+Our paper contributes to three strands of literature. First, we contribute to the literature on credit default prediction and credit scoring. Yeh and Lien (2009) introduced this dataset and compared six data mining methods, finding neural networks to perform best in terms of predictive accuracy. We extend their analysis by including more recent methods — XGBoost and Random Forest — and by adding regularised regression as a benchmark, allowing a more complete picture of the accuracy–complexity tradeoff. Bhandary and Ghosh (2025) conduct a similar comparison across statistical and machine learning methods on a related credit default dataset, finding that ensemble methods consistently outperform logistic regression on AUC; our findings are consistent with this result while providing additional interpretive detail through the nested logistic regression design. Lessmann et al. (2015) provide a large-scale benchmark of classification algorithms for credit scoring across many datasets, concluding that no single method dominates uniformly; our results echo this finding — XGBoost wins on F1 and recall but the margin over simpler models is modest.
+
+Second, we contribute to the literature on the determinants of consumer delinquency. Kim et al. (2018) study credit card loan delinquency using Korean account-level data and find that repayment behavior, debt-to-income ratios, and macroeconomic conditions all shape delinquency risk, while demographic characteristics play a more limited role. Our findings are consistent with theirs in emphasising behavioral predictors over demographics, though we cannot speak to macroeconomic channels given the cross-sectional nature of our data. Gross and Souleles (2002) document the importance of liquidity constraints in driving consumer bankruptcy and delinquency; our finding that higher credit limits reduce default risk is consistent with the view that financial slack matters for repayment behavior.
+
+Third, we contribute to the growing literature on the causal interpretation of credit limit effects. Pitso and Michael (2026) apply Bayesian causal inference methods to this same dataset and find that increases in credit limits causally reduce default risk, even controlling for selection into higher limits. Our observational finding that `limit_bal_th` negatively predicts default is consistent with their causal estimate, though we are careful to interpret our coefficient as an association rather than a causal effect.
+
+The rest of this paper is structured as follows. Section 2 describes the data source, variable definitions, and preprocessing steps. Section 3 presents descriptive analyses. Section 4 describes the empirical approach, including model construction and the train-test split. Section 5 presents and discusses the main results. Section 6 concludes.
+
+---
+
+# 2 Data
+
+## 2.1 Data source and sample construction
+
+The data used in this study come from the UCI Machine Learning Repository and were originally collected and introduced by Yeh and Lien (2009). The dataset covers 30,000 credit card clients of a Taiwanese bank, observed from April to September 2005. For each client, the dataset records six months of repayment status, bill amounts, and payment amounts, alongside demographic information and a binary outcome indicating whether the client defaulted on their payment in the following month (October 2005).
+
+The raw dataset contains 30,000 unique client observations. We apply the following preprocessing steps. First, we remove the client ID variable, which carries no predictive information. Second, we deduplicate the dataset, retaining only distinct rows. Third, we recode the `EDUCATION` and `MARRIAGE` variables from numeric codes into interpretable factor levels. Observations with `EDUCATION` or `MARRIAGE` coded as "Unknown" or "Other" — categories that cannot be meaningfully interpreted — are excluded from the analytical sample. This results in a final sample of 21,846 observations used for all modelling.
+
+## 2.2 Variables and definitions
+
+The dataset contains four groups of variables. The first group consists of **demographic characteristics**: sex (male/female), education (graduate school, university, or high school), marital status (married or single), and age in years. The second group is **credit exposure**, measured by `LIMIT_BAL` — the total credit limit in NT dollars, including both individual and supplementary family credit. The third group captures **repayment behavior** through six monthly repayment status variables (`PAY_0` through `PAY_6`, covering September to April 2005). Each takes integer values from -1 (paid on time) to 9 (nine or more months delayed). Alongside these, the dataset records the corresponding monthly **bill amounts** (`BILL_AMT1–6`) and **actual payment amounts** (`PAY_AMT1–6`) in NT dollars, providing a complete picture of each client's credit activity over the six-month window. The binary outcome variable indicates whether the client defaulted on their payment in October 2005.
+
+
+## 2.3 Data cleaning and preprocessing
+
+```{r data-cleaning}
+df <- read_csv("UCI_Credit_Card.csv")
+
+df <- df %>% clean_names()
+df <- df %>% select(-id)
+df <- df %>% distinct()
+
+df <- df %>%
+  mutate(sex = factor(sex,
+                      levels = c(1, 2),
+                      labels = c("Male", "Female")))
+
+df <- df %>%
+  mutate(education = case_when(
+    education == 1 ~ "Graduate School",
+    education == 2 ~ "University",
+    education == 3 ~ "High School",
+    education == 4 ~ "Other",
+    TRUE ~ "Unknown"
+  )) %>%
+  mutate(education = factor(education))
+
+df <- df %>%
+  mutate(marriage = case_when(
+    marriage == 1 ~ "Married",
+    marriage == 2 ~ "Single",
+    marriage == 3 ~ "Other",
+    TRUE ~ "Unknown"
+  )) %>%
+  mutate(marriage = factor(marriage))
+
+df <- df %>%
+  rename(default = default_payment_next_month) %>%
+  mutate(default = factor(default,
+                          levels = c(0,1),
+                          labels = c("No Default", "Default")))
+
+df <- df %>%
+  filter(!(education %in% c("Unknown", "Other"))) %>%
+  filter(!(marriage %in% c("Unknown", "Other"))) %>%
+  mutate(limit_bal_th = limit_bal / 100000,
+         age_group = cut(age,
+                         breaks = c(20, 25, 30, 35, 40, 45, 50, 60, 80),
+                         right = FALSE))
+
+df
+```
+
+
+### Note on dataset consistency
+
+A known issue with this dataset is that a share of observations record a repayment status of -1 (paid on time) while simultaneously reporting a payment amount of zero for the same month. This is internally inconsistent — a client cannot have paid on time and paid nothing. The check below quantifies the share of such observations in our cleaned sample. We do not drop these observations, as the inconsistency likely reflects coding conventions in the original data rather than data entry errors, and excluding them would reduce sample size without a principled justification. This limitation is noted where relevant in the discussion of results.
+
+```{r}
+pay_status_vars <- c("pay_0","pay_2","pay_3","pay_4","pay_5","pay_6")
+pay_amount_vars <- c("pay_amt1","pay_amt2","pay_amt3","pay_amt4","pay_amt5","pay_amt6")
+
+df %>%
+  mutate(inconsistent = rowSums(
+    matrix(
+      mapply(function(s, a) df[[s]] == -1 & df[[a]] == 0,
+             pay_status_vars, pay_amount_vars),
+      ncol = 6)
+  ) > 0) %>%
+  count(inconsistent) %>%
+  mutate(share = n / sum(n))
+```
+
+---
+
+# 3 Descriptive Analyses
+
+## 3.1 Summary statistics
+
+The cleaned sample of 21,846 observations has a default rate of approximately 22%, meaning roughly one in five clients defaulted on their payment in October 2005. This class imbalance — 78% non-defaulters versus 22% defaulters — is an important feature of the data that affects all subsequent modelling choices and evaluation metrics, as we discuss in Section 4.
+
+The sample is approximately 40% male and 60% female. In terms of education, the majority of clients hold a university degree or above. The age distribution is concentrated in the 25–45 range, with relatively few clients over 60.
+
+```{r summary-stats}
+# Compact summary table of key variables
+summary_tbl <- df %>%
+  mutate(default_num = ifelse(default == "Default", 1, 0)) %>%
+  summarise(
+    `N` = n(),
+    `Default rate` = round(mean(default_num), 3),
+    `Age (mean)` = round(mean(age), 1),
+    `Age (sd)` = round(sd(age), 1),
+    `Credit limit – mean (NT$ k)` = round(mean(limit_bal) / 1000, 0),
+    `Credit limit – median (NT$ k)` = round(median(limit_bal) / 1000, 0),
+    `Share male` = round(mean(sex == "Male"), 3),
+    `Share married` = round(mean(marriage == "Married"), 3),
+    `Share university or above` = round(mean(education %in% c("University", "Graduate School")), 3)
+  ) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Value") %>%
+  mutate(Value = as.character(Value))
+
+summary_tbl %>%
+  kable(caption = "Table 1: Sample summary statistics", align = c("l", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 3.2 Visual exploration
+
+The charts below explore default rates across key demographic and behavioral dimensions. A dashed red line marks the overall default rate as a reference point in each plot.
+
+Default rates are similar across sexes, with males defaulting at a marginally higher rate than females. The difference is small and, as we confirm in the regression models, is not statistically significant once other variables are controlled for. By education level, graduate school holders have the lowest default rate and high school graduates the highest — a weak gradient consistent with H3, though again this difference does not survive multivariate controls. By marital status, married clients default at a higher rate than single ones, a pattern that persists in the regression results and merits discussion. By age group, younger borrowers (20–30) default more frequently than older ones, with rates declining through middle age before rising slightly for older groups, suggesting a weak nonlinear pattern.
+
+The most striking descriptive patterns are in the repayment behavior plots. Default rates rise sharply with the severity of the worst payment delay: clients with no delay have a default rate near the overall average, while those with delays of 2 months or more default at rates exceeding 50%. Similarly, default rates increase monotonically with the number of months in which at least one delayed payment was recorded. For credit exposure, the pattern is also clear and consistent with H2: clients in the lowest credit limit deciles default at rates substantially above the average, while those in the highest deciles default at rates well below it.
+
+```{r}
+theme_ds <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      text                = element_text(family = "serif"),
+      plot.title          = element_text(family = "serif", face = "bold",
+                                         size = base_size + 3,
+                                         margin = ggplot2::margin(b = 6)),
+      plot.subtitle       = element_text(family = "serif", size = base_size,
+                                         color = "grey40",
+                                         margin = ggplot2::margin(b = 10)),
+      plot.caption        = element_text(family = "serif", size = base_size - 2,
+                                         color = "grey50", hjust = 0),
+      axis.title          = element_text(family = "serif", face = "bold",
+                                         size = base_size - 1),
+      axis.text           = element_text(family = "serif", color = "grey30"),
+      axis.line           = element_line(color = "grey70", linewidth = 0.4),
+      axis.ticks          = element_line(color = "grey70", linewidth = 0.3),
+      panel.grid.major.y  = element_line(color = "grey90", linewidth = 0.4),
+      panel.grid.major.x  = element_blank(),
+      panel.grid.minor    = element_blank(),
+      panel.background    = element_rect(fill = "white", color = NA),
+      plot.background     = element_rect(fill = "white", color = NA),
+      legend.position     = "top",
+      legend.title        = element_blank(),
+      legend.text         = element_text(family = "serif", size = base_size - 1),
+      legend.key.size     = unit(0.9, "lines"),
+      plot.title.position = "plot",
+      plot.margin         = ggplot2::margin(10, 15, 10, 10)
+    )
+}
+
+default_rate_by <- function(data, var) {
+  data %>%
+    group_by({{ var }}) %>%
+    summarise(
+      n = n(),
+      default_rate = mean(default == "Default"),
+      .groups = "drop"
+    ) %>%
+    mutate({{ var }} := fct_reorder({{ var }}, default_rate))
+}
+```
+
+### Figure 1: Default rates by demographic characteristics
+
+```{r descriptive-plots, fig.width=10, fig.height=8, fig.cap="Figure 1: Default rates by sex, education level, marital status, and age group. Dashed red line shows the overall default rate (22.1%)."}
+overall_rate <- mean(df$default == "Default")
+
+p_sex <- default_rate_by(df, sex) %>%
+  ggplot(aes(x = sex, y = default_rate)) +
+  geom_col(width = 0.4, fill = "#4A708B") +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.4, fontface = "bold", size = 3.5) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.32),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(title = "By sex", x = NULL, y = "Default rate") +
+  theme_ds()
+
+p_edu <- default_rate_by(df, education) %>%
+  ggplot(aes(x = education, y = default_rate)) +
+  geom_col(width = 0.7, fill = "#4A708B") +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.4, fontface = "bold", size = 3.3) +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.32),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(title = "By education level", x = NULL, y = "Default rate") +
+  theme_ds()
+
+p_mar <- default_rate_by(df, marriage) %>%
+  ggplot(aes(x = marriage, y = default_rate)) +
+  geom_col(width = 0.6, fill = "#4A708B") +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.4, fontface = "bold", size = 3.5) +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.32),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(title = "By marital status", x = NULL, y = "Default rate") +
+  theme_ds()
+
+age_summary <- df %>%
+  group_by(age_group) %>%
+  summarise(default_rate = mean(default == "Default"), .groups = "drop") %>%
+  filter(!is.na(age_group))
+
+p_age <- age_summary %>%
+  ggplot(aes(x = age_group, y = default_rate)) +
+  geom_col(width = 0.75, fill = "#4A708B") +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.5, size = 3.1, fontface = "bold") +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.38),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(title = "By age group", x = NULL, y = "Default rate") +
+  theme_ds() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+(p_sex | p_edu) / (p_mar | p_age) +
+  plot_annotation(
+    title = "Figure 1: Default rates by demographic characteristics",
+    subtitle = "Dashed red line = overall default rate",
+    theme = theme(plot.title = element_text(face = "bold", size = 14))
+  )
+```
+
+### Figure 2: Default rates by repayment behavior and credit exposure
+
+```{r behavioral-plots, fig.width=10, fig.height=8, fig.cap="Figure 2: Default rates by worst payment delay, frequency of delays, credit limit decile, and credit limit distribution by default status. Dashed red line shows overall default rate."}
+
+pay_vars <- c("pay_0","pay_2","pay_3","pay_4","pay_5","pay_6")
+
+df_dyn <- df %>%
+  mutate(
+    worst_delay = pmax(!!!rlang::syms(pay_vars), na.rm = TRUE),
+    months_late = rowSums(across(all_of(pay_vars), ~ .x >= 1), na.rm = TRUE)
+  )
+
+dyn_worst <- df_dyn %>%
+  group_by(worst_delay) %>%
+  summarise(n = n(), default_rate = mean(default == "Default"), .groups = "drop") %>%
+  mutate(worst_delay = factor(worst_delay, levels = sort(unique(worst_delay))))
+
+p_dyn1 <- dyn_worst %>%
+  ggplot(aes(x = worst_delay, y = default_rate)) +
+  geom_col(width = 0.75, fill = "#4A708B") +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.4, size = 3.1, fontface = "bold") +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(title = "By worst payment delay (months)", x = "Worst repayment status", y = "Default rate") +
+  theme_ds()
+
+dyn_late <- df_dyn %>%
+  group_by(months_late) %>%
+  summarise(n = n(), default_rate = mean(default == "Default"), .groups = "drop")
+
+p_dyn2 <- dyn_late %>%
+  ggplot(aes(x = months_late, y = default_rate)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.8, size = 3.1, fontface = "bold") +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(breaks = sort(unique(dyn_late$months_late))) +
+  labs(title = "By number of months with delayed payment", x = "Months late", y = "Default rate") +
+  theme_ds()
+
+df_vol <- df %>%
+  filter(!is.na(limit_bal)) %>%
+  mutate(limit_decile = ntile(limit_bal, 10))
+
+vol_dec <- df_vol %>%
+  group_by(limit_decile) %>%
+  summarise(n = n(), default_rate = mean(default == "Default"),
+            mean_limit = mean(limit_bal), .groups = "drop")
+
+p_vol1 <- vol_dec %>%
+  ggplot(aes(x = limit_decile, y = default_rate)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
+            vjust = -0.8, size = 3.1, fontface = "bold") +
+  geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.45),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(breaks = 1:10) +
+  labs(title = "By credit limit decile (1 = lowest)", x = "Credit limit decile", y = "Default rate") +
+  theme_ds()
+
+p_vol2 <- df_vol %>%
+  mutate(default = factor(default, levels = c("No Default", "Default"))) %>%
+  ggplot(aes(x = default, y = limit_bal / 1000)) +
+  geom_boxplot(outlier.alpha = 0.1, fill = "#4A708B", alpha = 0.4) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(title = "Credit limit distribution by default status",
+       x = NULL, y = "Credit limit (NT$ thousands)") +
+  theme_ds()
+
+(p_dyn1 | p_dyn2) / (p_vol1 | p_vol2) +
+  plot_annotation(
+    title = "Figure 2: Default rates by repayment behavior and credit exposure",
+    subtitle = "Dashed red line = overall default rate",
+    theme = theme(plot.title = element_text(face = "bold", size = 14))
+  )
+```
+
+## 3.3 Correlations / relationships
+
+### Figure 3: Correlation matrix
+
+The correlation matrix below summarises pairwise linear relationships between the outcome variable (`default_num`) and the key predictors used in the models. The average repayment status across the six months shows the strongest positive correlation with default, confirming the descriptive patterns above. Credit limit (`limit_bal_th`) shows a meaningful negative correlation with default. Demographic variables — age, sex, education level, and marital status — have correlations with default that are close to zero, suggesting limited marginal explanatory power at the bivariate level. These patterns are broadly consistent with what the multivariate regression results will show.
+
+```{r correlation-matrix, fig.width=7, fig.height=6, fig.cap="Figure 3: Pairwise correlation matrix of the outcome variable and key model predictors."}
+pay_vars <- c("pay_0","pay_2","pay_3","pay_4","pay_5","pay_6")
+
+df_corr <- df %>%
+  mutate(
+    avg_repay_status = rowMeans(across(all_of(pay_vars)), na.rm = TRUE),
+    default_num = ifelse(default == "Default", 1, 0),
+    sex_male = ifelse(sex == "Male", 1, 0),
+    education_level = case_when(
+      education == "Graduate School" ~ 3,
+      education == "University" ~ 2,
+      education == "High School" ~ 1,
+      TRUE ~ 0
+    ),
+    married = ifelse(marriage == "Married", 1, 0)
+  )
+
+corr_data <- df_corr %>%
+  select(default_num, limit_bal_th, avg_repay_status, age, sex_male, education_level, married) %>%
+  rename(
+    `Default` = default_num,
+    `Credit limit` = limit_bal_th,
+    `Avg repay status` = avg_repay_status,
+    `Age` = age,
+    `Male` = sex_male,
+    `Education` = education_level,
+    `Married` = married
+  ) %>%
+  mutate(across(everything(), as.numeric))
+
+cor_matrix <- cor(corr_data)
+cor_long <- melt(cor_matrix)
+
+ggplot(cor_long, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(value, 2)), size = 3.2, fontface = "bold") +
+  scale_fill_gradient2(low = "#B2182B", mid = "white", high = "#4A708B",
+                       midpoint = 0, limits = c(-1, 1),
+                       name = "Correlation") +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x = element_text(angle = 40, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 13),
+    panel.grid = element_blank()
+  ) +
+  labs(title = "Figure 3: Correlation matrix (key variables)", x = NULL, y = NULL)
+```
+
+---
+
+# 4 Empirical Approach
+
+## 4.1 Model dataset construction
+
+For the modelling stage, we construct a set of derived variables from the cleaned dataset. The outcome variable is `default_num`, a binary indicator equal to 1 if the client defaulted. The key behavioral predictors are `pay_0` (the most recent repayment status, from September 2005) and `months_late`, a variable we construct as the count of the six monthly repayment status variables (`pay_0` through `pay_6`) that record a delay of at least one month. This construction aggregates the payment history into a single summary of cumulative delinquency over the observation window, complementing the point-in-time signal from `pay_0`.
+
+Credit exposure is measured by `limit_bal_th`, the credit limit scaled to hundred-thousands of NT dollars, which improves numerical stability in the models. Demographic controls include `age`, `age_sq` (to allow for nonlinear age effects), `sex_male` (binary, equal to 1 for male), `education_level` (ordinal, coded 1 for high school, 2 for university, 3 for graduate school), and `married` (binary, equal to 1 for married).
+
+```{r model-df}
+pay_vars <- c("pay_0","pay_2","pay_3","pay_4","pay_5","pay_6")
+
+model_df <- df %>%
+  mutate(
+    default_num    = ifelse(default == "Default", 1, 0),
+    months_late    = rowSums(across(all_of(pay_vars), ~ .x >= 1), na.rm = TRUE),
+    sex_male       = ifelse(sex == "Male", 1, 0),
+    education_level = case_when(
+      education == "Graduate School" ~ 3,
+      education == "University"      ~ 2,
+      education == "High School"     ~ 1,
+      TRUE                           ~ 0
+    ),
+    married        = ifelse(marriage == "Married", 1, 0),
+    age_sq         = age^2
+  ) %>%
+  select(default_num, pay_0, months_late, limit_bal_th,
+         age, age_sq, sex_male, education_level, married)
+```
+
+## 4.2 Train / test split
+
+We partition the sample into a training set (75%) and a held-out test set (25%) using stratified random sampling to preserve the class balance across both sets. All models are estimated exclusively on the training data. Predictive performance is evaluated solely on the test set, which none of the models have seen during estimation. This design ensures that reported performance metrics reflect genuine out-of-sample predictive ability rather than in-sample fit.
+
+```{r train-test-split}
+set.seed(42)
+
+train_idx <- createDataPartition(model_df$default_num, p = 0.75, list = FALSE)
+train_df  <- model_df[ train_idx, ]
+test_df   <- model_df[-train_idx, ]
+
+tibble(
+  Split              = c("Training", "Test"),
+  `N`                = c(nrow(train_df), nrow(test_df)),
+  `Default rate`     = round(c(mean(train_df$default_num), mean(test_df$default_num)), 4),
+  `Non-default rate` = round(c(1 - mean(train_df$default_num), 1 - mean(test_df$default_num)), 4)
+) %>%
+  kable(caption = "Train / test split summary", align = c("l","r","r","r")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 4.3 Logistic regression
+
+We estimate four nested logistic regression models. M1 includes only `pay_0` as a predictor, establishing a minimal baseline. M2 adds `months_late`, capturing the cumulative payment history. M3 adds `limit_bal_th` as a measure of credit exposure. M4 adds the full set of demographic controls: `age`, `age_sq`, `sex_male`, `education_level`, and `married`. The nested structure allows us to assess the marginal contribution of each group of predictors in terms of both coefficient significance and model fit (AIC).
+
+```{r logistic-regression}
+m1 <- glm(default_num ~ pay_0,
+          data = train_df, family = binomial)
+
+m2 <- glm(default_num ~ pay_0 + months_late,
+          data = train_df, family = binomial)
+
+m3 <- glm(default_num ~ pay_0 + months_late + limit_bal_th,
+          data = train_df, family = binomial)
+
+m4 <- glm(default_num ~ pay_0 + months_late + limit_bal_th +
+            age + age_sq + sex_male + education_level + married,
+          data = train_df, family = binomial)
+
+modelsummary(
+  list("M1" = m1, "M2" = m2, "M3" = m3, "M4" = m4),
+  stars    = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+  gof_map  = c("nobs", "aic"),
+  fmt      = 3,
+  title    = "Table 2: Logistic regression models — coefficient estimates",
+  notes    = "Standard errors in parentheses. * p<0.1, ** p<0.05, *** p<0.01.",
+  output   = "kableExtra"
+) %>%
+  gsub("&amp;nbsp;", "&nbsp;", .) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## 4.4 Regularised logistic regression (LASSO & Ridge)
+
+To complement the logistic regression results, we estimate two regularised models: LASSO (L1 penalty) and Ridge (L2 penalty). Both add a penalty on the size of the estimated coefficients to the log-likelihood objective, preventing overfitting and — in the case of LASSO — performing automatic variable selection by shrinking some coefficients to exactly zero. The penalty parameter $\lambda$ is selected for each method via 5-fold cross-validation on the training set, minimising binomial deviance. Both models use the same set of predictors as M4.
+
+```{r lasso-ridge}
+X_train <- model.matrix(default_num ~ ., data = train_df)[, -1]
+y_train <- train_df$default_num
+X_test  <- model.matrix(default_num ~ ., data = test_df)[, -1]
+y_test  <- test_df$default_num
+
+set.seed(42)
+cv_lasso <- cv.glmnet(X_train, y_train, alpha = 1, family = "binomial", nfolds = 5)
+cv_ridge <- cv.glmnet(X_train, y_train, alpha = 0, family = "binomial", nfolds = 5)
+
+par(mfrow = c(1, 2))
+plot(cv_lasso, main = "LASSO")
+plot(cv_ridge, main = "Ridge")
+par(mfrow = c(1, 1))
+
+# Formatted coefficient comparison table
+lasso_coefs <- coef(cv_lasso, s = "lambda.min") %>% as.matrix() %>%
+  as.data.frame() %>% rownames_to_column("Variable") %>%
+  rename(LASSO = lambda.min)
+
+ridge_coefs <- coef(cv_ridge, s = "lambda.min") %>% as.matrix() %>%
+  as.data.frame() %>% rownames_to_column("Variable") %>%
+  rename(Ridge = lambda.min)
+
+reg_table <- left_join(lasso_coefs, ridge_coefs, by = "Variable") %>%
+  mutate(
+    LASSO = ifelse(LASSO == 0, "—", round(LASSO, 4)),
+    Ridge = round(Ridge, 4)
+  )
+
+reg_table %>%
+  kable(caption = "Table 3: Regularised regression coefficients at lambda.min",
+        align = c("l", "r", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  footnote(general = paste0(
+    "LASSO lambda.min = ", round(cv_lasso$lambda.min, 4),
+    "  |  Ridge lambda.min = ", round(cv_ridge$lambda.min, 4),
+    ". '—' indicates coefficient shrunk to exactly zero by LASSO."
+  ), general_title = "")
+```
+
+## 4.5 Random Forest
+
+Random Forest is an ensemble method that builds a large number of decision trees on bootstrap samples of the training data, with each split in each tree restricted to a random subset of predictors. Predictions are aggregated by majority vote across trees. This design decorrelates the trees, reducing variance relative to a single decision tree, and allows the model to capture nonlinear relationships and interactions without explicit specification. We train a forest of 500 trees with `mtry = 3` (the number of variables considered at each split), using `set.seed(42)` for reproducibility. Variable importance is assessed using two measures: mean decrease in accuracy (how much accuracy drops when a variable is permuted) and mean decrease in Gini impurity (how much each variable reduces node impurity across all splits).
+
+```{r random-forest}
+set.seed(42)
+
+rf_model <- randomForest(
+  factor(default_num) ~ .,
+  data       = train_df,
+  ntree      = 500,
+  mtry       = 3,
+  importance = TRUE
+)
+
+# Formatted OOB confusion matrix
+rf_cm <- rf_model$confusion
+data.frame(
+  `Predicted: No Default` = rf_cm[, 1],
+  `Predicted: Default`    = rf_cm[, 2],
+  `Class error`           = round(rf_cm[, 3], 4),
+  check.names = FALSE
+) %>%
+  rownames_to_column("Actual") %>%
+  kable(caption = "Table 4: Random Forest — OOB confusion matrix (500 trees, mtry = 3)",
+        align = c("l", "r", "r", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  footnote(general = paste0("OOB estimate of error rate: ",
+                             round(rf_model$err.rate[500, 1] * 100, 2), "%"),
+           general_title = "")
+
+varImpPlot(rf_model, main = "Figure 4: Random Forest — variable importance")
+```
+
+## 4.6 Gradient Boosting (XGBoost)
+
+XGBoost (eXtreme Gradient Boosting) is a sequential ensemble method in which each new tree is fitted to the residuals of the current ensemble, iteratively correcting prediction errors. Unlike Random Forest, which reduces variance by averaging many independent trees, XGBoost primarily reduces bias through this sequential error-correction process, while controlling variance via regularisation penalties on tree complexity and the use of a small learning rate. We train two XGBoost specifications: a standard model using the observed class distribution, and a class-weighted model that assigns a weight equal to the negative-to-positive class ratio (approximately 3.5) to defaulter observations via `scale_pos_weight`. The class-weighted version directly addresses the 78/22 class imbalance by making misclassification of true defaulters more costly during training, which we expect to improve recall at the cost of some precision. Both models use a learning rate (`eta`) of 0.05, maximum tree depth of 4, subsampling rates of 0.8 for both observations and columns, and are trained for 200 rounds.
+
+```{r xgboost}
+dtrain <- xgb.DMatrix(data = X_train, label = y_train)
+dtest  <- xgb.DMatrix(data = X_test,  label = y_test)
+
+set.seed(42)
+xgb_model <- xgb.train(
+  params  = list(
+    objective        = "binary:logistic",
+    eval_metric      = "auc",
+    eta              = 0.05,
+    max_depth        = 4,
+    subsample        = 0.8,
+    colsample_bytree = 0.8
+  ),
+  data    = dtrain,
+  nrounds = 200,
+  watchlist  = list(train = dtrain, test = dtest),
+  verbose    = 0
+)
+
+xgb.importance(model = xgb_model) %>%
+  xgb.plot.importance(top_n = 9, main = "XGBoost (no class weighting): Variable Importance")
+```
+## 4.7 Gradient Boosting (XGBoost, with class weights)
+
+The class-weighted XGBoost model uses the same hyperparameters as above, with the addition of `scale_pos_weight` set to the ratio of non-defaulters to defaulters in the training set. This instructs the algorithm to treat each true default observation as approximately 3.5 times more important than a non-default observation when computing the loss, effectively re-balancing the training objective to give greater weight to the minority class.
+
+```{r}
+neg_pos_ratio <- sum(y_train == 0) / sum(y_train == 1)
+
+set.seed(42)
+xgb_model_weighted <- xgb.train(
+  params  = list(
+    objective        = "binary:logistic",
+    eval_metric      = "auc",
+    eta              = 0.05,
+    max_depth        = 4,
+    subsample        = 0.8,
+    colsample_bytree = 0.8,
+    scale_pos_weight = neg_pos_ratio   # only new line in params
+  ),
+  data    = dtrain,
+  nrounds = 200,
+  watchlist  = list(train = dtrain, test = dtest),
+  verbose    = 0
+)
+
+xgb.importance(model = xgb_model_weighted) %>%
+  xgb.plot.importance(top_n = 9, main = "XGBoost Weighted: Variable Importance")
+```
+
+## 4.8 Model comparison
+
+All models are evaluated on the held-out test set using five metrics. **AUC** (area under the ROC curve) measures overall discriminative ability across all possible classification thresholds, ranging from 0.5 (random) to 1.0 (perfect). **Accuracy** measures the share of correctly classified observations; given the class imbalance, this metric is upwardly misleading and included mainly for reference. **Precision** measures the share of predicted defaulters who actually defaulted. **Recall** measures the share of actual defaulters that the model correctly identifies; in a banking context, this is the most practically relevant metric, as a missed defaulter (false negative) typically carries a higher cost than a false alarm. **F1** is the harmonic mean of precision and recall, providing a single summary of performance that accounts for both. Classification decisions are made at a threshold of 0.5 for all models.
+
+```{r model-comparison}
+eval_model <- function(model, model_type = "glm") {
+  if (model_type == "glm") {
+    probs <- predict(model, newdata = test_df, type = "response")
+  } else if (model_type == "glmnet_lasso") {
+    probs <- as.vector(predict(cv_lasso, newx = X_test, s = "lambda.min", type = "response"))
+  } else if (model_type == "glmnet_ridge") {
+    probs <- as.vector(predict(cv_ridge, newx = X_test, s = "lambda.min", type = "response"))
+  } else if (model_type == "rf") {
+    probs <- as.numeric(predict(model, newdata = test_df, type = "prob")[, 2])
+  } else if (model_type == "xgb") {
+    probs <- predict(model, newdata = dtest)
+  }
+
+  preds <- ifelse(probs > 0.5, 1, 0)
+  auc   <- as.numeric(auc(roc(y_test, probs, quiet = TRUE)))
+  acc   <- mean(preds == y_test)
+  cm    <- confusionMatrix(factor(preds), factor(y_test), positive = "1")
+
+  list(
+    AUC       = round(auc, 4),
+    Accuracy  = round(acc, 4),
+    Precision = round(cm$byClass["Precision"], 4),
+    Recall    = round(cm$byClass["Recall"], 4),
+    F1        = round(cm$byClass["F1"], 4)
+  )
+}
+
+results <- bind_rows(
+  eval_model(m1,        "glm")          %>% as_tibble() %>% mutate(Model = "M1"),
+  eval_model(m2,        "glm")          %>% as_tibble() %>% mutate(Model = "M2"),
+  eval_model(m3,        "glm")          %>% as_tibble() %>% mutate(Model = "M3"),
+  eval_model(m4,        "glm")          %>% as_tibble() %>% mutate(Model = "M4"),
+  eval_model(NULL,      "glmnet_lasso") %>% as_tibble() %>% mutate(Model = "LASSO"),
+  eval_model(NULL,      "glmnet_ridge") %>% as_tibble() %>% mutate(Model = "Ridge"),
+  eval_model(rf_model,  "rf")           %>% as_tibble() %>% mutate(Model = "Random Forest"),
+  eval_model(xgb_model, "xgb")          %>% as_tibble() %>% mutate(Model = "XGBoost"),
+  eval_model(xgb_model_weighted, "xgb") %>% as_tibble() %>% mutate(Model = "XGBoost Weighted"),
+) %>%
+  select(Model, AUC, Accuracy, Precision, Recall, F1)
+
+results %>%
+  kable(caption = "Model comparison on held-out test set") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 5 Results
+
+## 5.1 Main results
+
+### Logistic regression
+
+Table 1 presents the results from the four nested logistic regression models estimated on the training set. The coefficient estimates are on the log-odds scale; a positive coefficient increases the probability of default and a negative one decreases it.
+
+M1, which includes only `pay_0`, already performs meaningfully above chance (AUC 0.674 on the test set), confirming that the most recent repayment status alone carries substantial predictive information. The coefficient of 0.770 is large and highly significant, indicating that each unit increase in payment delay status is associated with considerably higher odds of default.
+
+Adding `months_late` in M2 produces the largest single improvement across all model transitions, with AIC falling from 20,782 to 19,872. The coefficient on `months_late` (0.393) is nearly as large as that on `pay_0` (0.348 in M2), indicating that cumulative payment history over the six-month window adds substantial information beyond the most recent month. Both variables remain strongly significant throughout all subsequent models.
+
+M3 introduces credit exposure (`limit_bal_th`), which enters with a negative and highly significant coefficient of -0.133. This confirms H2: higher credit limits are associated with a lower probability of default, consistent with the view that credit limits proxy for both creditworthiness and financial slack (Gross and Souleles, 2002; Pitso and Michael, 2026). The AIC improvement from M2 to M3 is moderate but meaningful (-75 points).
+
+M4 adds the full set of demographic controls. Among these, only `married` is statistically significant, with a positive coefficient of 0.157 (p < 0.01). This is counterintuitive relative to H3: married borrowers default *more*, not less, than single ones, conditional on repayment history and credit exposure. We discuss this finding below. Age, its square, sex, and education level are all statistically insignificant. H3 is therefore not supported. The AIC improvement from M3 to M4 is modest (-22 points), driven almost entirely by the `married` variable rather than the other demographic controls. The regularised specifications (LASSO and Ridge) confirm this pattern: with cross-validation optimal penalty parameters of $\lambda = 0.001$ and $\lambda = 0.017$ respectively, both methods arrive at essentially the same coefficient structure as M4, with LASSO shrinking `age` and `education_level` to exactly zero — performing variable selection that agrees with the insignificance findings in M4.
+
+### Tree-based models
+
+The Random Forest variable importance plots (Figure 5) show that `months_late` ranks highest on mean decrease in accuracy, followed by `pay_0` and `limit_bal_th`. On mean decrease in Gini, `pay_0` and `limit_bal_th` rank highest, reflecting that these variables produce the cleanest splits across the many trees. Demographic variables — `married`, `education_level`, `age`, `sex_male` — all cluster at the bottom of both importance rankings, adding minimal predictive information to the ensemble.
+
+The XGBoost variable importance plot (Figure 6) is even more stark. Using gain as the importance metric (the total reduction in loss attributable to each variable across all splits), `pay_0` alone accounts for approximately 51% of the total predictive gain, with `months_late` contributing a further 31%. Together, these two repayment behavior variables account for roughly 82% of all predictive information in the gradient boosting model. `limit_bal_th` adds a further 9%, and everything else is negligible.
+
+### Model comparison
+
+Table 2 summarises predictive performance for all eight models on the held-out test set. Several patterns are worth noting.
+
+First, the logistic regression family performs remarkably consistently across M1 through Ridge. Accuracy is essentially identical at 0.80 across all logistic specifications, and AUC rises only gradually from 0.674 (M1) to 0.722 (M4) as predictors are added. The regularised models (LASSO AUC 0.721, Ridge AUC 0.721) perform on par with M4, confirming that the M4 specification is already close to the maximum the linear functional form can extract from these predictors.
+
+Second, the tree-based methods outperform the logistic family, but by a modest margin. Random Forest achieves AUC 0.725 and XGBoost 0.751 — a gain of roughly 3 AUC points over the best logistic model. This suggests the data-generating process is largely linear, with some additional signal available to nonlinear methods but not a transformative amount.
+
+Third, the recall figures reveal the impact of class imbalance most clearly. All logistic models achieve recall in the range of 0.27–0.31, meaning they identify fewer than one in three true defaulters at the 0.5 classification threshold. Random Forest improves this to 0.340, and the standard XGBoost to 0.352. The class-weighted XGBoost produces the most substantial improvement: recall rises to 0.583, meaning the model now correctly identifies more than half of actual defaulters. This comes at the cost of reduced precision (0.448 versus 0.629 for the unweighted model) and lower accuracy (0.752), reflecting the precision-recall tradeoff inherent in lowering the effective decision threshold. On F1 — the metric that balances precision and recall — the class-weighted XGBoost is the clear winner at 0.507, well above the next best model (unweighted XGBoost at 0.451).
+
+## 5.2 Discussion
+
+**H1 — repayment behavior increases default probability.** Strongly confirmed across all methods. `pay_0` and `months_late` are the dominant predictors in every model, linear and nonlinear alike. The consistency across LASSO (which performs variable selection), Random Forest (which does not pre-specify functional form), and XGBoost (which captures interactions) is particularly compelling: very different methods all agree that recent and cumulative payment delays are the primary signal for default risk. This is consistent with the broader literature on behavioral scoring (Thomas, 2000, as cited in Kim et al., 2018), which has long emphasised that past repayment behavior is the most reliable predictor of future default.
+
+**H2 — higher credit exposure reduces default probability.** Confirmed. The negative coefficient on `limit_bal_th` is stable across M3, M4, LASSO, and Ridge, and the variable ranks third in importance in both tree-based models. Higher credit limits are associated with lower default risk, a finding consistent with two mechanisms: selection (higher limits are granted to more creditworthy borrowers) and financial slack (a larger credit cushion reduces liquidity pressure). Disentangling these mechanisms would require a causal design; Pitso and Michael (2026) pursue exactly this approach and find that increases in credit limits causally reduce default, suggesting the financial slack channel is at least partly operative.
+
+**H3 — financial stability characteristics reduce default.** Not confirmed. Age, education, and sex are all insignificant in M4, LASSO zeros out age and education entirely, and both tree-based models rank all three demographic variables near the bottom of importance. This finding is consistent with Yeh and Lien (2009), who also find limited predictive power for demographics on this same dataset, and with Kim et al. (2018), who find that demographic factors play a secondary role to behavioral and financial variables in the Korean context.
+
+**The `married` anomaly.** The one significant demographic finding — that married borrowers default more — deserves careful discussion. The raw default rates in Section 3 show married clients defaulting at a higher rate than single ones, and this persists in M4 conditional on all other covariates. Several explanations are plausible. Married households may face higher fixed financial obligations (housing, dependents) that increase vulnerability to income shocks. The dataset's credit limit variable explicitly includes supplementary or family credit, meaning married borrowers may carry higher joint obligations not fully captured by `limit_bal_th`, leaving residual risk in the `married` coefficient. It is also possible that `married` proxies for unobserved variables such as number of dependents or housing costs, which are not available in the dataset. We cannot distinguish between these mechanisms with the available data, and caution against interpreting the finding as a stable, causal effect of marriage on default propensity.
+
+**The recall problem.** The most practically significant finding for banking applications is not which model wins on AUC, but how poorly all models perform on recall at the 0.5 threshold — and how much the class-weighted XGBoost improves on this. In a real credit risk setting, the cost of missing a true defaulter (a loan that goes bad, with full loss given default) typically far exceeds the cost of falsely flagging a good borrower (a declined application or enhanced monitoring). The optimal decision threshold should therefore be set below 0.5, tilted toward catching more defaulters. The class-weighted XGBoost internalises this logic during training itself, achieving recall of 0.583 — nearly double that of the best logistic model — while still maintaining reasonable precision and the highest F1 across all models.
+
+---
+
+# 6 Conclusion
+
+## 6.1 Key takeaways
+
+This paper asked to what extent credit card default can be predicted from borrower demographics, credit exposure, and repayment history. Across eight models of varying complexity — from a single-variable logistic regression to a class-weighted gradient boosting ensemble — three consistent conclusions emerge.
+
+First, repayment behavior is the dominant signal for credit default prediction. The most recent payment status (`pay_0`) and the cumulative count of delayed payments (`months_late`) together account for the vast majority of predictive information across every model estimated, including those specifically designed to detect nonlinear patterns and interactions. This finding strongly supports H1 and is consistent with the broader credit scoring literature's emphasis on behavioral indicators over static borrower characteristics.
+
+Second, credit exposure matters in the expected direction. Higher credit limits are robustly associated with lower default probability, supporting H2. This association persists across logistic regression, regularised models, and tree-based methods, and is consistent with both selection into creditworthiness and the financial slack channel documented in the causal literature.
+
+Third, borrower demographics add little to prediction once behavioral and financial variables are controlled. Age, education level, and sex are statistically insignificant in the fully specified logistic model, are zeroed out by LASSO, and rank at the bottom of importance in both tree-based models. H3 is not supported. The one exception — married borrowers defaulting at higher rates — is a robust but difficult-to-interpret finding, likely reflecting unobserved household financial obligations rather than a direct effect of marital status.
+
+From a methodological standpoint, tree-based methods modestly outperform logistic regression (XGBoost AUC 0.751 versus 0.722 for M4), but the gap is small. This suggests the prediction problem is largely linear, and that the main binding constraint on performance is data availability rather than model complexity. The class-weighted XGBoost achieves the best balance of precision and recall (F1 = 0.507) and is the recommended model for applications where identifying true defaulters is the primary objective.
+
+## 6.2 Limitations
+
+Several limitations should be kept in mind when interpreting these findings. First, the dataset lacks key variables that theory and prior empirical work identify as important determinants of default: income, debt-to-income ratio, employment status, and the number of outstanding credit obligations. The AUC ceiling of approximately 0.75 across all models likely reflects this data gap rather than fundamental unpredictability in default behavior. Kim et al. (2018) find that the debt-to-income ratio is among the strongest predictors of delinquency in the Korean context; a variable of this kind is absent here.
+
+Second, the sample is specific to Taiwanese credit card clients in 2005, a period that immediately followed a consumer credit crisis in Taiwan. Default rates and the relative importance of different predictors may differ in other credit markets, time periods, or economic environments. Generalising the findings beyond this context requires caution.
+
+Third, the dataset contains a known internal inconsistency: a share of observations record on-time repayment status while simultaneously reporting zero payment in the same month. We retain these observations, but they may introduce noise into the repayment behavior variables.
+
+Fourth, all predictive performance is evaluated at a fixed classification threshold of 0.5. The optimal threshold in practice depends on the bank's relative cost of false negatives versus false positives — a ratio that varies by institution and loan type — and should be calibrated accordingly rather than fixed arbitrarily.
+
+Finally, this study is predictive rather than causal. The association between, for example, credit limits and default does not identify a causal effect of credit limit policy on default risk. Causal questions of this kind require more sophisticated identification strategies, such as those employed by Pitso and Michael (2026) using Bayesian causal inference on this same dataset.
+
+## 6.3 Future research
+
+Several extensions of this work would be valuable. The most impactful improvement would likely come from enriching the predictor set with income and leverage data, which would allow both a more complete predictive model and a closer examination of the mechanisms behind the credit exposure finding. On the modelling side, applying SMOTE or other resampling techniques to address class imbalance — rather than class weighting alone — would be a natural extension that may further improve recall. Threshold calibration, perhaps using cost-sensitive learning with explicit false-negative and false-positive cost parameters, would make the models more directly applicable to real lending decisions. Finally, extending the analysis to a panel setting — tracking borrowers across multiple observation windows — would allow investigation of whether the predictive power of behavioral variables is stable over time, or whether it varies with macroeconomic conditions as suggested by Kim et al. (2018).
+
+---
+
+# References
+
+- Bhandary, R., and Ghosh, B.K. (2025): "Credit Card Default Prediction: An Empirical Analysis on Predictive Performance Using Statistical and Machine Learning Methods", *Journal of Risk and Financial Management*, 18: 23.
+
+- Gross, D.B., and Souleles, N.S. (2002): "Do Liquidity Constraints and Interest Rates Matter for Consumer Behavior? Evidence from Credit Card Data", *The Quarterly Journal of Economics*, 117(1): 149–185.
+
+- Kim, H., Cho, H., and Ryu, D. (2018): "An Empirical Study on Credit Card Loan Delinquency", *Economic Systems*, 42(3): 437–449.
+
+- Lessmann, S., Baesens, B., Seow, H.V., and Thomas, L.C. (2015): "Benchmarking State-of-the-Art Classification Algorithms for Credit Scoring: An Update of Research", *European Journal of Operational Research*, 247(1): 124–136.
+
+- Pitso, S.D., and Michael, T. (2026): "Bayesian Causal Inference for Credit Default: Evidence from Taiwanese Credit Card Data", *Risks*, 14(2): 38.
+
+- Yeh, I.C., and Lien, C.H. (2009): "The Comparisons of Data Mining Techniques for the Predictive Accuracy of Probability of Default of Credit Card Clients", *Expert Systems with Applications*, 36(2): 2473–2480.
+
+---
