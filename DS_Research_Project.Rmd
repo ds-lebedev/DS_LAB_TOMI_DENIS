@@ -18,6 +18,9 @@ output:
     df_print: paged
     code_folding: hide
     highlight: kate
+  word_document:
+    toc: true
+    toc_depth: '3'
 subtitle: Credit Card Default Risk Prediction
 params:
   course: Data Science Lab (ECB3DSL), Academic year 2025/2026
@@ -113,7 +116,7 @@ We, the aforementioned students, herewith declare that we have divided the work 
 
 ## 1.1 Research question and motivation
 
-Credit card default poses a significant and ongoing challenge for financial institutions. When borrowers fail to meet their repayment obligations, banks face direct credit losses, increased provisioning costs, and broader balance-sheet risks. At the societal level, high rates of consumer default have been linked to financial instability and reduced access to credit for future borrowers (Gross and Souleles, 2002). The ability to accurately identify borrowers at risk of default — before the event occurs — is therefore both practically valuable and economically important.
+Credit card default poses a significant and ongoing challenge for financial institutions. When borrowers fail to meet their repayment obligations, banks face direct credit losses, increased provisioning costs, and broader balance-sheet risks. At the societal level, high rates of consumer default have been linked to financial instability and reduced access to credit for future borrowers (Gross and Souleles, 2002). The ability to accurately identify borrowers at risk of default — before the event occurs — is therefore both practically valuable and economically important. In this context, default behavior can be viewed as part of the broader field of household finance, which studies how individuals make borrowing and repayment decisions under uncertainty (Campbell, 2006).
 
 The growth of large-scale consumer credit datasets has created an opportunity to address this challenge using statistical and machine learning methods. Rather than relying on simple credit scoring rules, modern approaches attempt to learn complex patterns from borrower behavior, financial history, and demographic characteristics. Yet a key empirical question remains open: how much of default risk is captured by behavioral signals like repayment history, how much by financial variables like credit exposure, and how much — if any — by demographic characteristics such as age, education, or marital status? Understanding the relative importance of these three categories of predictors has implications not only for model design, but also for fairness in credit allocation: if demographic variables drive prediction, this raises concerns about discriminatory lending; if behavioral signals dominate, this is a more defensible basis for risk assessment.
 
@@ -133,7 +136,7 @@ Our paper contributes to three strands of literature. First, we contribute to th
 
 Second, we contribute to the literature on the determinants of consumer delinquency. Kim et al. (2018) study credit card loan delinquency using Korean account-level data and find that repayment behavior, debt-to-income ratios, and macroeconomic conditions all shape delinquency risk, while demographic characteristics play a more limited role. Our findings are consistent with theirs in emphasising behavioral predictors over demographics, though we cannot speak to macroeconomic channels given the cross-sectional nature of our data. Gross and Souleles (2002) document the importance of liquidity constraints in driving consumer bankruptcy and delinquency; our finding that higher credit limits reduce default risk is consistent with the view that financial slack matters for repayment behavior.
 
-Third, we contribute to the growing literature on the causal interpretation of credit limit effects. Pitso and Michael (2026) apply Bayesian causal inference methods to this same dataset and find that increases in credit limits causally reduce default risk, even controlling for selection into higher limits. Our observational finding that `limit_bal_th` negatively predicts default is consistent with their causal estimate, though we are careful to interpret our coefficient as an association rather than a causal effect.
+Third, we relate our findings to the literature on the relationship between credit limits and default risk. Pitso and Michael (2026) apply Bayesian causal inference methods to this dataset and find that increases in credit limits causally reduce default risk, even after accounting for selection into higher limits. Our results reveal a similar negative relationship between `limit_bal_th` and default probability. However, as our analysis is based on observational data and predictive models, we interpret this relationship as an association rather than evidence of a causal effect.
 
 The rest of this paper is structured as follows. Section 2 describes the data source, variable definitions, and preprocessing steps. Section 3 presents descriptive analyses. Section 4 describes the empirical approach, including model construction and the train-test split. Section 5 presents and discusses the main results. Section 6 concludes.
 
@@ -309,16 +312,17 @@ default_rate_by <- function(data, var) {
 
 ### Figure 1: Default rates by demographic characteristics
 
-```{r descriptive-plots, fig.width=10, fig.height=8, fig.cap="Figure 1: Default rates by sex, education level, marital status, and age group. Dashed red line shows the overall default rate (22.1%)."}
+```{r descriptive-plots, fig.width=10, fig.height=9, fig.cap="Figure 1: Default rates by sex, education level, marital status, and age group. Dashed red line shows the overall default rate (22.1%)."}
 overall_rate <- mean(df$default == "Default")
 
 p_sex <- default_rate_by(df, sex) %>%
   ggplot(aes(x = sex, y = default_rate)) +
   geom_col(width = 0.4, fill = "#4A708B") +
   geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
-  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
-            vjust = -0.4, fontface = "bold", size = 3.5) +
-  scale_y_continuous(labels = scales::percent, limits = c(0, 0.32),
+  geom_text(aes(y = default_rate + 0.028,
+                label = scales::percent(default_rate, accuracy = 0.1)),
+            fontface = "bold", size = 3.5) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.34),
                      expand = expansion(mult = c(0, 0))) +
   labs(title = "By sex", x = NULL, y = "Default rate") +
   theme_ds()
@@ -326,10 +330,11 @@ p_sex <- default_rate_by(df, sex) %>%
 p_edu <- default_rate_by(df, education) %>%
   ggplot(aes(x = education, y = default_rate)) +
   geom_col(width = 0.7, fill = "#4A708B") +
-  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
-            vjust = -0.4, fontface = "bold", size = 3.3) +
   geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
-  scale_y_continuous(labels = scales::percent, limits = c(0, 0.32),
+  geom_text(aes(y = default_rate + 0.015,
+                label = scales::percent(default_rate, accuracy = 0.1)),
+            fontface = "bold", size = 3.3) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.34),
                      expand = expansion(mult = c(0, 0))) +
   labs(title = "By education level", x = NULL, y = "Default rate") +
   theme_ds()
@@ -337,10 +342,11 @@ p_edu <- default_rate_by(df, education) %>%
 p_mar <- default_rate_by(df, marriage) %>%
   ggplot(aes(x = marriage, y = default_rate)) +
   geom_col(width = 0.6, fill = "#4A708B") +
-  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
-            vjust = -0.4, fontface = "bold", size = 3.5) +
   geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
-  scale_y_continuous(labels = scales::percent, limits = c(0, 0.32),
+  geom_text(aes(y = default_rate + 0.025,
+                label = scales::percent(default_rate, accuracy = 0.1)),
+            fontface = "bold", size = 3.5) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.34),
                      expand = expansion(mult = c(0, 0))) +
   labs(title = "By marital status", x = NULL, y = "Default rate") +
   theme_ds()
@@ -353,10 +359,11 @@ age_summary <- df %>%
 p_age <- age_summary %>%
   ggplot(aes(x = age_group, y = default_rate)) +
   geom_col(width = 0.75, fill = "#4A708B") +
-  geom_text(aes(label = scales::percent(default_rate, accuracy = 0.1)),
-            vjust = -0.5, size = 3.1, fontface = "bold") +
   geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
-  scale_y_continuous(labels = scales::percent, limits = c(0, 0.38),
+  geom_text(aes(y = default_rate + 0.0195,
+                label = scales::percent(default_rate, accuracy = 0.1)),
+            size = 3.1, fontface = "bold") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.40),
                      expand = expansion(mult = c(0, 0))) +
   labs(title = "By age group", x = NULL, y = "Default rate") +
   theme_ds() +
@@ -586,7 +593,7 @@ modelsummary(
   gof_map  = c("nobs", "aic"),
   fmt      = 3,
   title    = "Table 2: Logistic regression models — coefficient estimates",
-  notes    = "Standard errors in parentheses. * p<0.1, ** p<0.05, *** p<0.01.",
+  notes    = "Standard errors in parentheses.",
   output   = "kableExtra"
 ) %>%
   gsub("&amp;nbsp;", "&nbsp;", .) %>%
@@ -608,8 +615,10 @@ cv_lasso <- cv.glmnet(X_train, y_train, alpha = 1, family = "binomial", nfolds =
 cv_ridge <- cv.glmnet(X_train, y_train, alpha = 0, family = "binomial", nfolds = 5)
 
 par(mfrow = c(1, 2))
-plot(cv_lasso, main = "LASSO")
-plot(cv_ridge, main = "Ridge")
+plot(cv_lasso)
+title("LASSO", line=3)
+plot(cv_ridge)
+title("Ridge", line=3)
 par(mfrow = c(1, 1))
 
 # Formatted coefficient comparison table
@@ -731,6 +740,8 @@ xgb.importance(model = xgb_model_weighted) %>%
 
 All models are evaluated on the held-out test set using five metrics. **AUC** (area under the ROC curve) measures overall discriminative ability across all possible classification thresholds, ranging from 0.5 (random) to 1.0 (perfect). **Accuracy** measures the share of correctly classified observations; given the class imbalance, this metric is upwardly misleading and included mainly for reference. **Precision** measures the share of predicted defaulters who actually defaulted. **Recall** measures the share of actual defaulters that the model correctly identifies; in a banking context, this is the most practically relevant metric, as a missed defaulter (false negative) typically carries a higher cost than a false alarm. **F1** is the harmonic mean of precision and recall, providing a single summary of performance that accounts for both. Classification decisions are made at a threshold of 0.5 for all models.
 
+However, in practice, the optimal threshold depends on the relative costs of different types of classification errors. For a financial institution, failing to identify a true defaulter (false negative) is typically more costly than incorrectly flagging a non-defaulter (false positive), as it leads directly to credit losses. This implies that a lower classification threshold may be preferred in practice, increasing recall at the expense of accuracy. In this context, models such as the class-weighted XGBoost — which prioritise the detection of defaulters — may be more useful despite achieving lower overall accuracy. The ROC curves presented above further illustrate this trade-off across all possible thresholds.
+
 ```{r model-comparison}
 eval_model <- function(model, model_type = "glm") {
   if (model_type == "glm") {
@@ -777,6 +788,144 @@ results %>%
   kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
 ```
 
+### 4.8.1 ROC curves
+
+Figure 5 compares the ROC curves of the logistic and regularized models. It shows how predictive performance changes across all classification thresholds, complementing the threshold-dependent metrics reported in Table 2.
+
+```{r roc-logistic-family, fig.width=7, fig.height=6, fig.cap="Figure 5: ROC curves for logistic and regularized models"}
+library(pROC)
+library(ggplot2)
+library(dplyr)
+library(tibble)
+
+roc_preds_logit <- list(
+  M1 = predict(m1, newdata = test_df, type = "response"),
+  M2 = predict(m2, newdata = test_df, type = "response"),
+  M3 = predict(m3, newdata = test_df, type = "response"),
+  M4 = predict(m4, newdata = test_df, type = "response"),
+  LASSO = as.vector(predict(cv_lasso, newx = X_test, s = "lambda.min", type = "response")),
+  Ridge = as.vector(predict(cv_ridge, newx = X_test, s = "lambda.min", type = "response"))
+)
+
+roc_list_logit <- lapply(roc_preds_logit, function(p) {
+  roc(response = y_test, predictor = p, quiet = TRUE)
+})
+
+roc_df_logit <- bind_rows(lapply(names(roc_list_logit), function(model_name) {
+  tibble(
+    fpr = 1 - roc_list_logit[[model_name]]$specificities,
+    tpr = roc_list_logit[[model_name]]$sensitivities,
+    Model = model_name
+  )
+}))
+
+auc_labels_logit <- sapply(names(roc_list_logit), function(model_name) {
+  paste0(model_name, " (AUC = ", round(as.numeric(auc(roc_list_logit[[model_name]])), 3), ")")
+})
+
+label_map_logit <- setNames(auc_labels_logit, names(auc_labels_logit))
+
+roc_colors_logit <- c(
+  "M1" = "#1B9E77",
+  "M2" = "#D95F02",
+  "M3" = "#7570B3",
+  "M4" = "#E7298A",
+  "LASSO" = "#66A61E",
+  "Ridge" = "#E6AB02"
+)
+
+ggplot(roc_df_logit, aes(x = fpr, y = tpr, color = Model)) +
+  geom_line(linewidth = 1.15) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.8) +
+  scale_color_manual(values = roc_colors_logit, labels = label_map_logit) +
+  labs(
+    title = "Figure 5: ROC curves for logistic
+and regularized models",
+    subtitle = "Held-out test set",
+    x = "False Positive Rate",
+    y = "True Positive Rate",
+    color = NULL
+  ) +
+  coord_equal() +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11, color = "grey30"),
+    axis.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "grey70", fill = NA, linewidth = 0.6),
+    legend.position = "bottom",
+    legend.text = element_text(size = 10),
+    legend.spacing.y = unit(0.2, "cm")
+  ) +
+  guides(color = guide_legend(ncol = 2, byrow = TRUE))
+```
+
+Figure 6 focuses on the strongest-performing models. The tree-based models dominate the benchmark logistic specification across most thresholds, confirming their, although marginal, superior performance on the held-out test set.
+
+```{r roc-best-models, fig.width=7, fig.height=6, fig.cap="Figure 6: ROC curves for best-performing models"}
+library(pROC)
+library(ggplot2)
+library(dplyr)
+library(tibble)
+
+roc_preds_best <- list(
+  M4 = predict(m4, newdata = test_df, type = "response"),
+  `Random Forest` = as.numeric(predict(rf_model, newdata = test_df, type = "prob")[, 2]),
+  XGBoost = predict(xgb_model, newdata = dtest),
+  `XGBoost Weighted` = predict(xgb_model_weighted, newdata = dtest)
+)
+
+roc_list_best <- lapply(roc_preds_best, function(p) {
+  roc(response = y_test, predictor = p, quiet = TRUE)
+})
+
+roc_df_best <- bind_rows(lapply(names(roc_list_best), function(model_name) {
+  tibble(
+    fpr = 1 - roc_list_best[[model_name]]$specificities,
+    tpr = roc_list_best[[model_name]]$sensitivities,
+    Model = model_name
+  )
+}))
+
+auc_labels_best <- sapply(names(roc_list_best), function(model_name) {
+  paste0(model_name, " (AUC = ", round(as.numeric(auc(roc_list_best[[model_name]])), 3), ")")
+})
+
+label_map_best <- setNames(auc_labels_best, names(auc_labels_best))
+
+roc_colors_best <- c(
+  "M4" = "#377EB8",
+  "Random Forest" = "#4DAF4A",
+  "XGBoost" = "#E41A1C",
+  "XGBoost Weighted" = "#984EA3"
+)
+
+ggplot(roc_df_best, aes(x = fpr, y = tpr, color = Model)) +
+  geom_line(linewidth = 1.25) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.8) +
+  scale_color_manual(values = roc_colors_best, labels = label_map_best) +
+  labs(
+    title = "Figure 6: ROC curves for best-performing models",
+    subtitle = "Held-out test set",
+    x = "False Positive Rate",
+    y = "True Positive Rate",
+    color = NULL
+  ) +
+  coord_equal() +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11, color = "grey30"),
+    axis.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "grey70", fill = NA, linewidth = 0.6),
+    legend.position = "bottom",
+    legend.text = element_text(size = 10),
+    legend.spacing.y = unit(0.2, "cm")
+  ) +
+  guides(color = guide_legend(ncol = 2, byrow = TRUE))
+```
 ---
 
 # 5 Results
@@ -785,7 +934,7 @@ results %>%
 
 ### Logistic regression
 
-Table 1 presents the results from the four nested logistic regression models estimated on the training set. The coefficient estimates are on the log-odds scale; a positive coefficient increases the probability of default and a negative one decreases it.
+Table 2 presents the results from the four nested logistic regression models estimated on the training set. The coefficient estimates are on the log-odds scale; a positive coefficient increases the probability of default and a negative one decreases it.
 
 M1, which includes only `pay_0`, already performs meaningfully above chance (AUC 0.674 on the test set), confirming that the most recent repayment status alone carries substantial predictive information. The coefficient of 0.770 is large and highly significant, indicating that each unit increase in payment delay status is associated with considerably higher odds of default.
 
@@ -794,6 +943,55 @@ Adding `months_late` in M2 produces the largest single improvement across all mo
 M3 introduces credit exposure (`limit_bal_th`), which enters with a negative and highly significant coefficient of -0.133. This confirms H2: higher credit limits are associated with a lower probability of default, consistent with the view that credit limits proxy for both creditworthiness and financial slack (Gross and Souleles, 2002; Pitso and Michael, 2026). The AIC improvement from M2 to M3 is moderate but meaningful (-75 points).
 
 M4 adds the full set of demographic controls. Among these, only `married` is statistically significant, with a positive coefficient of 0.157 (p < 0.01). This is counterintuitive relative to H3: married borrowers default *more*, not less, than single ones, conditional on repayment history and credit exposure. We discuss this finding below. Age, its square, sex, and education level are all statistically insignificant. H3 is therefore not supported. The AIC improvement from M3 to M4 is modest (-22 points), driven almost entirely by the `married` variable rather than the other demographic controls. The regularised specifications (LASSO and Ridge) confirm this pattern: with cross-validation optimal penalty parameters of $\lambda = 0.001$ and $\lambda = 0.017$ respectively, both methods arrive at essentially the same coefficient structure as M4, with LASSO shrinking `age` and `education_level` to exactly zero — performing variable selection that agrees with the insignificance findings in M4.
+
+```{r table 5, converted coefficients}
+library(margins)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+
+mfx <- margins(m4)
+
+mfx_table <- summary(mfx) %>%
+  as.data.frame() %>%
+  mutate(
+    Variable = factor(factor, levels = factor),
+    Variable = recode(
+      Variable,
+      "pay_0" = "Most recent payment delay",
+      "months_late" = "Number of months with delay",
+      "limit_bal_th" = "Credit limit (100k NT$)",
+      "married" = "Married",
+      "age" = "Age",
+      "age_sq" = "Age squared",
+      "education_level" = "Education level",
+      "sex_male" = "Male"
+    ),
+    stars = case_when(
+      p < 0.01 ~ "***",
+      p < 0.05 ~ "**",
+      p < 0.1  ~ "*",
+      TRUE ~ ""
+    ),
+    AME = paste0(sprintf("%.4f", AME), stars),
+    `Std. Error` = sprintf("%.4f", SE),
+  ) %>%
+  select(Variable, AME, `Std. Error`)
+
+kable(
+  mfx_table,
+  caption = "Table 5: Average Marginal Effects from Model M4",
+  align = c("l", "r", "r", "r")
+) %>%
+  kable_styling(full_width = FALSE) %>%
+  add_footnote(
+    label = "Notes: AME = average marginal effect. Values represent percentage-point changes in the probability of default associated with a one-unit increase in the corresponding variable, holding other variables constant.
+* p < 0.1, ** p < 0.05, *** p < 0.01.",
+    notation = "none"
+  )
+```
+
+Beyond statistical significance, the economic magnitude of these effects is substantial. A one-unit increase in the most recent payment delay increases the probability of default by approximately 4.7 percentage points, holding other variables constant. Similarly, each additional month with delayed payments increases default probability by about 5.4 percentage points, confirming that cumulative repayment problems carry substantial predictive weight beyond the most recent delay. In contrast, the effect of credit exposure is more moderate: a one-unit increase in credit limit reduces the probability of default by approximately 2 percentage points. Finally, married borrowers exhibit a 2.2 percentage point higher probability of default compared to single borrowers, conditional on other factors. Taken together, these results indicate that repayment behavior is not only statistically dominant but also economically meaningful in explaining default risk.
 
 ### Tree-based models
 
@@ -861,14 +1059,24 @@ Several extensions of this work would be valuable. The most impactful improvemen
 
 - Bhandary, R., and Ghosh, B.K. (2025): "Credit Card Default Prediction: An Empirical Analysis on Predictive Performance Using Statistical and Machine Learning Methods", *Journal of Risk and Financial Management*, 18: 23.
 
+- Campbell, J.Y. (2006) “Household Finance” *Journal of Finance*, 61(4), 1553–1604
+
 - Gross, D.B., and Souleles, N.S. (2002): "Do Liquidity Constraints and Interest Rates Matter for Consumer Behavior? Evidence from Credit Card Data", *The Quarterly Journal of Economics*, 117(1): 149–185.
 
 - Kim, H., Cho, H., and Ryu, D. (2018): "An Empirical Study on Credit Card Loan Delinquency", *Economic Systems*, 42(3): 437–449.
 
 - Lessmann, S., Baesens, B., Seow, H.V., and Thomas, L.C. (2015): "Benchmarking State-of-the-Art Classification Algorithms for Credit Scoring: An Update of Research", *European Journal of Operational Research*, 247(1): 124–136.
 
-- Pitso, S.D., and Michael, T. (2026): "Bayesian Causal Inference for Credit Default: Evidence from Taiwanese Credit Card Data", *Risks*, 14(2): 38.
+- Pitso, S.D., and Michael, T. (2026): "Bayesian Causal Inference for Credit Default Risk", *Risks*, 14(2): 38.
 
 - Yeh, I.C., and Lien, C.H. (2009): "The Comparisons of Data Mining Techniques for the Predictive Accuracy of Probability of Default of Credit Card Clients", *Expert Systems with Applications*, 36(2): 2473–2480.
 
 ---
+
+```{r}
+library(margins)
+
+marg <- margins(m4)
+summary(marg)
+```
+
