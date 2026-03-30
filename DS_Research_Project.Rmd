@@ -316,8 +316,8 @@ default_rate_by <- function(data, var) {
 overall_rate <- mean(df$default == "Default")
 
 p_sex <- default_rate_by(df, sex) %>%
-  ggplot(aes(x = sex, y = default_rate)) +
-  geom_col(width = 0.4, fill = "#4A708B") +
+  ggplot(aes(x = reorder(sex, -default_rate), y = default_rate)) +
+  geom_col(width = 0.5, fill = "#4A708B") +
   geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
   geom_text(aes(y = default_rate + 0.028,
                 label = scales::percent(default_rate, accuracy = 0.1)),
@@ -328,8 +328,8 @@ p_sex <- default_rate_by(df, sex) %>%
   theme_ds()
 
 p_edu <- default_rate_by(df, education) %>%
-  ggplot(aes(x = education, y = default_rate)) +
-  geom_col(width = 0.7, fill = "#4A708B") +
+  ggplot(aes(x = reorder(education, -default_rate), y = default_rate)) +
+  geom_col(width = 0.5, fill = "#4A708B") +
   geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
   geom_text(aes(y = default_rate + 0.015,
                 label = scales::percent(default_rate, accuracy = 0.1)),
@@ -340,8 +340,8 @@ p_edu <- default_rate_by(df, education) %>%
   theme_ds()
 
 p_mar <- default_rate_by(df, marriage) %>%
-  ggplot(aes(x = marriage, y = default_rate)) +
-  geom_col(width = 0.6, fill = "#4A708B") +
+  ggplot(aes(x = reorder(marriage, -default_rate), y = default_rate)) +
+  geom_col(width = 0.5, fill = "#4A708B") +
   geom_hline(yintercept = overall_rate, linetype = "dashed", linewidth = 0.8, color = "red") +
   geom_text(aes(y = default_rate + 0.025,
                 label = scales::percent(default_rate, accuracy = 0.1)),
@@ -363,7 +363,7 @@ p_age <- age_summary %>%
   geom_text(aes(y = default_rate + 0.0195,
                 label = scales::percent(default_rate, accuracy = 0.1)),
             size = 3.1, fontface = "bold") +
-  scale_y_continuous(labels = scales::percent, limits = c(0, 0.40),
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.34),
                      expand = expansion(mult = c(0, 0))) +
   labs(title = "By age group", x = NULL, y = "Default rate") +
   theme_ds() +
@@ -372,7 +372,7 @@ p_age <- age_summary %>%
 (p_sex | p_edu) / (p_mar | p_age) +
   plot_annotation(
     title = "Figure 1: Default rates by demographic characteristics",
-    subtitle = "Dashed red line = overall default rate",
+    subtitle = "Dashed red line = overall default rate (22.1%)",
     theme = theme(plot.title = element_text(face = "bold", size = 14))
   )
 ```
@@ -456,7 +456,7 @@ p_vol2 <- df_vol %>%
 (p_dyn1 | p_dyn2) / (p_vol1 | p_vol2) +
   plot_annotation(
     title = "Figure 2: Default rates by repayment behavior and credit exposure",
-    subtitle = "Dashed red line = overall default rate",
+    subtitle = "Dashed red line = overall default rate (22.1%)",
     theme = theme(plot.title = element_text(face = "bold", size = 14))
   )
 ```
@@ -708,6 +708,7 @@ xgb_model <- xgb.train(
 xgb.importance(model = xgb_model) %>%
   xgb.plot.importance(top_n = 9, main = "XGBoost (no class weighting): Variable Importance")
 ```
+
 ## 4.7 Gradient Boosting (XGBoost, with class weights)
 
 The class-weighted XGBoost model uses the same hyperparameters as above, with the addition of `scale_pos_weight` set to the ratio of non-defaulters to defaulters in the training set. This instructs the algorithm to treat each true default observation as approximately 3.5 times more important than a non-default observation when computing the loss, effectively re-balancing the training objective to give greater weight to the minority class.
@@ -906,7 +907,8 @@ ggplot(roc_df_best, aes(x = fpr, y = tpr, color = Model)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.8) +
   scale_color_manual(values = roc_colors_best, labels = label_map_best) +
   labs(
-    title = "Figure 6: ROC curves for best-performing models",
+    title = "Figure 6: ROC curves for best-performing
+models",
     subtitle = "Held-out test set",
     x = "False Positive Rate",
     y = "True Positive Rate",
@@ -1072,11 +1074,3 @@ Several extensions of this work would be valuable. The most impactful improvemen
 - Yeh, I.C., and Lien, C.H. (2009): "The Comparisons of Data Mining Techniques for the Predictive Accuracy of Probability of Default of Credit Card Clients", *Expert Systems with Applications*, 36(2): 2473–2480.
 
 ---
-
-```{r}
-library(margins)
-
-marg <- margins(m4)
-summary(marg)
-```
-
